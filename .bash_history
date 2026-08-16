@@ -68,3 +68,21 @@ jobs:
           projectId: focus-quest-study
 EOF
 
+git add -A
+git commit -m "Initial commit for Focus Quest auto-deploy"
+git branch -M main
+git remote add origin https://github.com/1919114514yasenpai-maker/focus-quest.git
+git push -u origin main
+git push -i origin main
+git push -u origin main
+cat << 'EOF' > .gitignore
+node_modules
+dist
+.cache
+.codeoss
+.gemini
+*.zip
+.vscode
+.docker
+EOF
+
