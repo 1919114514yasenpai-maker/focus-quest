@@ -176,6 +176,7 @@ export function sanitizeSaveData(rawData: any): SaveData {
       ? rawStats.maxStageReached
       : (typeof rawStats.stage === 'number' && rawStats.stage > 0 ? rawStats.stage : 1),
     job: (['merchant', 'miner', 'appraiser', 'warrior', 'balanced'].includes(rawStats.job) ? rawStats.job : 'balanced'),
+    lastJobChangeLevel: typeof rawStats.lastJobChangeLevel === 'number' ? rawStats.lastJobChangeLevel : undefined,
   };
 
   return {

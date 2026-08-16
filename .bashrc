@@ -116,3 +116,5 @@ if ! shopt -oq posix; then
   fi
 fi
 source /google/devshell/bashrc.google
+alias up='unzip -o $(ls -t focus-quest*.zip 2>/dev/null | head -1) 2>/dev/null; git add -A && git commit -m "update" && git push origin main'
+alias up='unzip -o $(ls -t *.zip | head -1) && git add -A && git commit -m "update $(ls -t *.zip | head -1)" && git push origin main'

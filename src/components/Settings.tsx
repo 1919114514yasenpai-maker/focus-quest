@@ -15,6 +15,7 @@ interface SettingsProps {
   onLogin?: () => void;
   onLogout?: () => void;
   onSaveToCloud?: () => void;
+  onLoadFromCloud?: () => void;
   onClearSyncError?: () => void;
 }
 
@@ -30,6 +31,7 @@ export const Settings: React.FC<SettingsProps> = ({
   onLogin,
   onLogout,
   onSaveToCloud,
+  onLoadFromCloud,
   onClearSyncError,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -173,13 +175,25 @@ export const Settings: React.FC<SettingsProps> = ({
                   </div>
                   <div className="flex items-center justify-between text-[11px] text-indigo-300">
                     <span>最終同期: {lastSyncedAt || '未同期'}</span>
-                    <button
-                      onClick={onSaveToCloud}
-                      disabled={syncing}
-                      className="pixel-btn text-[10px] py-1 px-2 active !border-indigo-400 !text-indigo-200"
-                    >
-                      ☁️ 今すぐ手動保存
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {onLoadFromCloud && (
+                        <button
+                          onClick={onLoadFromCloud}
+                          disabled={syncing}
+                          className="pixel-btn text-[9px] py-1 px-1.5 !bg-slate-800 !border-slate-600 !text-slate-300 hover:!text-white"
+                          title="クラウドから最新データを強制再読み込み"
+                        >
+                          🔄 再読込
+                        </button>
+                      )}
+                      <button
+                        onClick={onSaveToCloud}
+                        disabled={syncing}
+                        className="pixel-btn text-[10px] py-1 px-2 active !border-indigo-400 !text-indigo-200"
+                      >
+                        ☁️ 今すぐ保存
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : (

@@ -10,11 +10,25 @@ import {
   browserLocalPersistence,
   indexedDBLocalPersistence
 } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { 
+  initializeFirestore, 
+  doc, 
+  getDocFromServer,
+  persistentLocalCache,
+  persistentMultipleTabManager
+} from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Initialize Firestore with experimentalForceLongPolling to bypass WebChannel / gRPC network blocks (common on MDM / Safari)
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+}, firebaseConfig.firestoreDatabaseId);
+
 export const auth = getAuth(app);
 
 // Configure local persistence
@@ -75,10 +89,16 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 export async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('connection timeout')), 3000)
+    );
+    await Promise.race([
+      getDocFromServer(doc(db, 'test', 'connection')),
+      timeoutPromise
+    ]);
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
+      console.warn("Firestore operating in offline / local cache mode.");
     }
   }
 }
@@ -94,7 +114,6 @@ export async function signInWithGoogle() {
     return result.user;
   } catch (error: any) {
     console.error("Google Sign In (popup) error:", error);
-    // If popup is blocked by Safari/MDM or opener is dropped, try redirect
     if (
       error.code === 'auth/popup-blocked' || 
       error.code === 'auth/cancelled-popup-request' ||

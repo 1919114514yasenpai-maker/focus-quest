@@ -61,6 +61,7 @@ export interface PlayerStats {
   stage: number;          // 現在の階層/ステージ
   maxStageReached: number; // 到達した最高階層
   job?: JobType;          // 特化職 (デフォルト: balanced)
+  lastJobChangeLevel?: number; // 最後に転職の機会を行使/確認したレベル (貯められない)
 }
 
 export interface EquipmentState {

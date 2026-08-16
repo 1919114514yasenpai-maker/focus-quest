@@ -11,7 +11,15 @@ import { getCompiledItem } from './itemUtils';
 import { generateChestReward, getChestForFocusMinutes } from './chestUtils';
 import { loadSaveDataFromLocalStorage, sanitizeSaveData, CURRENT_SAVE_KEY } from './saveManager';
 import { JOBS } from './jobData';
-import { getMaterialBonusCount, getXpBonusMultiplier, getGoldBonusMultiplier, getAppraiserPowerBonus } from './jobUtils';
+import { 
+  getMaterialBonusCount, 
+  getXpBonusMultiplier, 
+  getGoldBonusMultiplier, 
+  getAppraiserPowerBonus,
+  isJobUnlocked,
+  canChangeJobNow,
+  getNextJobChangeLevel
+} from './jobUtils';
 import { useCloudSave } from './useCloudSave';
 
 import { DailyShopItem } from './dailyShopUtils';
@@ -33,6 +41,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showStageSelect, setShowStageSelect] = useState(false);
   const [showJobModal, setShowJobModal] = useState(false);
+  const [isJobMilestoneTrigger, setIsJobMilestoneTrigger] = useState(false);
 
   const [pendingChestReward, setPendingChestReward] = useState<ChestReward | null>(null);
   const [pendingChestFocusMins, setPendingChestFocusMins] = useState<number | undefined>(undefined);
@@ -121,6 +130,7 @@ export default function App() {
     syncError,
     clearSyncError,
     saveToCloud,
+    loadFromCloud,
     handleLogin,
     handleLogout,
   } = useCloudSave({ stats, equipment, inventory }, handleCloudDataLoaded);
@@ -265,6 +275,8 @@ export default function App() {
     const finalXp = Math.floor(gainedXp * xpMult);
     const finalGold = Math.floor(gainedGold * goldMult);
 
+    let reachedMilestoneLevel = 0;
+
     setStats(prev => {
       let newXp = prev.xp + finalXp;
       let newLevel = prev.level;
@@ -273,6 +285,9 @@ export default function App() {
       while (newXp >= nextLevelXp) {
         newXp -= nextLevelXp;
         newLevel += 1;
+        if (newLevel === 100 || (newLevel > 100 && newLevel % 500 === 0)) {
+          reachedMilestoneLevel = newLevel;
+        }
         nextLevelXp = getNextLevelXp(newLevel);
       }
 
@@ -283,6 +298,16 @@ export default function App() {
         gold: prev.gold + finalGold,
       };
     });
+
+    if (reachedMilestoneLevel > 0) {
+      setIsJobMilestoneTrigger(true);
+      setShowJobModal(true);
+      if (reachedMilestoneLevel === 100) {
+        showToast('🎉 祝・Lv.100到達！ 特化職の儀式が解禁されました！');
+      } else {
+        showToast(`⚡ 祝・Lv.${reachedMilestoneLevel}到達！ 転職の儀式が発動しました！`);
+      }
+    }
   };
 
   const handleAttackMonster = (damage: number, isCrit: boolean, lifestealHeal: number) => {
@@ -419,9 +444,16 @@ export default function App() {
   };
 
   const handleSelectJob = (newJob: JobType) => {
-    setStats(prev => ({ ...prev, job: newJob }));
+    setStats(prev => ({ ...prev, job: newJob, lastJobChangeLevel: prev.level }));
+    setIsJobMilestoneTrigger(false);
     const jobDef = JOBS[newJob];
     showToast(`🏛️ 転職成功！「${jobDef.icon} ${jobDef.name}」になりました。`);
+  };
+
+  const handleDismissMilestoneJob = () => {
+    setStats(prev => ({ ...prev, lastJobChangeLevel: prev.level }));
+    setIsJobMilestoneTrigger(false);
+    showToast(`🏛️ 特化職を維持しました。（次回変更チャンス: Lv.${getNextJobChangeLevel(stats.level)}）`);
   };
 
   const handleSellItem = (uid: string, sellPrice: number) => {
@@ -627,13 +659,28 @@ export default function App() {
           <div className="flex justify-between items-center mb-1 gap-1">
             <div className="flex items-center gap-1">
               <span className="text-xs sm:text-sm text-amber-300 font-bold">勇者 Lv.{stats.level}</span>
-              <button
-                onClick={() => setShowJobModal(true)}
-                className="pixel-btn text-[9px] !py-0.5 !px-1.5 !bg-indigo-950 !text-indigo-300 !border-indigo-600 hover:!bg-indigo-900 flex items-center gap-1"
-                title="特化職を変更"
-              >
-                <span>{currentJobDef.icon} {currentJobDef.name}</span>
-              </button>
+              {(() => {
+                const unlocked = isJobUnlocked(stats.level);
+                const canChange = canChangeJobNow(stats.level, stats.lastJobChangeLevel);
+                return (
+                  <button
+                    onClick={() => {
+                      setIsJobMilestoneTrigger(canChange);
+                      setShowJobModal(true);
+                    }}
+                    className={`pixel-btn text-[9px] !py-0.5 !px-1.5 flex items-center gap-1 ${
+                      canChange
+                        ? '!bg-amber-600 !text-white !border-amber-400 animate-bounce'
+                        : '!bg-indigo-950 !text-indigo-300 !border-indigo-600 hover:!bg-indigo-900'
+                    }`}
+                    title={unlocked ? "特化職神殿" : "特化職 (Lv.100で解禁)"}
+                  >
+                    <span>{currentJobDef.icon} {currentJobDef.name}</span>
+                    {canChange && <span className="text-[8px] bg-amber-400 text-slate-950 font-bold px-1 rounded">転職可!</span>}
+                    {!unlocked && <span className="text-[8px] bg-slate-800 text-slate-400 px-1 rounded border border-slate-700">Lv.100解禁</span>}
+                  </button>
+                );
+              })()}
             </div>
             <button
               onClick={() => setShowStageSelect(true)}
@@ -745,9 +792,27 @@ export default function App() {
           </>
         )}
 
-        <button onClick={() => setShowJobModal(true)} className="pixel-btn text-xs sm:text-sm px-3 sm:px-5 py-2 sm:py-2.5 !bg-indigo-950/90 !border-indigo-500 !text-indigo-200 hover:!bg-indigo-900">
-          🏛️ {currentJobDef.icon} 特化職
-        </button>
+        {(() => {
+          const unlocked = isJobUnlocked(stats.level);
+          const canChange = canChangeJobNow(stats.level, stats.lastJobChangeLevel);
+          return (
+            <button
+              onClick={() => {
+                setIsJobMilestoneTrigger(canChange);
+                setShowJobModal(true);
+              }}
+              className={`pixel-btn text-xs sm:text-sm px-3 sm:px-5 py-2 sm:py-2.5 flex items-center gap-1.5 ${
+                canChange
+                  ? '!bg-amber-600 !border-amber-400 !text-white hover:!bg-amber-500 animate-pulse'
+                  : '!bg-indigo-950/90 !border-indigo-500 !text-indigo-200 hover:!bg-indigo-900'
+              }`}
+            >
+              <span>🏛️ {currentJobDef.icon} 特化職</span>
+              {canChange && <span className="text-[10px] bg-amber-400 text-slate-950 font-bold px-1.5 py-0.2 rounded">転職可!</span>}
+              {!unlocked && <span className="text-[10px] bg-slate-900 text-slate-400 px-1 rounded border border-slate-700">Lv.100解禁</span>}
+            </button>
+          );
+        })()}
 
         <button onClick={() => setShowInventory(!showInventory)} className="pixel-btn text-xs sm:text-sm px-4 sm:px-6 py-2 sm:py-2.5">
           🎒 装備と工房 {timerMode === 'focus' && '🔒'}
@@ -771,8 +836,12 @@ export default function App() {
       {showJobModal && (
         <JobSelectModal
           currentJob={stats.job || 'balanced'}
+          level={stats.level}
+          lastJobChangeLevel={stats.lastJobChangeLevel}
+          isMilestoneTrigger={isJobMilestoneTrigger}
           onSelectJob={handleSelectJob}
           onClose={() => setShowJobModal(false)}
+          onDismissMilestone={handleDismissMilestoneJob}
         />
       )}
 
@@ -826,9 +895,13 @@ export default function App() {
           onLogin={handleLogin}
           onLogout={handleLogout}
           onClearSyncError={clearSyncError}
-          onSaveToCloud={() => {
-            saveToCloud({ stats, equipment, inventory });
-            showToast('☁️ クラウドに手動保存しました！');
+          onSaveToCloud={async () => {
+            await saveToCloud({ stats, equipment, inventory });
+            showToast('☁️ クラウド同期を実行しました！');
+          }}
+          onLoadFromCloud={async () => {
+            await loadFromCloud();
+            showToast('☁️ クラウドから最新データを再読み込みしました！');
           }}
         />
       )}

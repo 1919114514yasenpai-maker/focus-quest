@@ -86,3 +86,9 @@ dist
 .docker
 EOF
 
+git rm -r --cached . 2>/dev/null
+git add .
+git commit -m "Focus Quest with clean auto deploy"
+git push -u origin main --force
+echo "alias up='unzip -o \$(ls -t focus-quest*.zip 2>/dev/null | head -1) 2>/dev/null; git add -A && git commit -m \"update\" && git push origin main'" >> ~/.bashrc && source ~/.bashrc
+echo "alias up='unzip -o \$(ls -t *.zip | head -1) && git add -A && git commit -m \"update \$(ls -t *.zip | head -1)\" && git push origin main'" >> ~/.bashrc && source ~/.bashrc

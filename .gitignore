@@ -1,8 +1,8 @@
-node_modules
-dist
-.cache
-.codeoss
-.gemini
-*.zip
-.vscode
-.docker
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
