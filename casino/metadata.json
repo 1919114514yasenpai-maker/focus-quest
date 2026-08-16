@@ -1,0 +1,6 @@
+{
+  "name": "High Roller",
+  "description": "A dice roll gamble game with daily login bonuses.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

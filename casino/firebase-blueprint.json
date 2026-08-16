@@ -1,0 +1,23 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with game balance and login tracking",
+      "type": "object",
+      "properties": {
+        "balance": { "type": "number", "description": "Current coins" },
+        "lastLoginDate": { "type": "string", "description": "Date string like YYYY-MM-DD" },
+        "updatedAt": { "type": "string", "description": "Timestamp" },
+        "createdAt": { "type": "string", "description": "Timestamp" },
+        "email": { "type": "string", "description": "User email" }
+      },
+      "required": ["balance", "lastLoginDate", "updatedAt", "createdAt", "email"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    }
+  }
+}

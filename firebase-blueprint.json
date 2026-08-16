@@ -1,0 +1,37 @@
+{
+  "entities": {
+    "UserSave": {
+      "title": "UserSave",
+      "description": "User's Focus Quest save data including stats, equipment, and inventory",
+      "type": "object",
+      "properties": {
+        "stats": {
+          "type": "object",
+          "description": "Player stats"
+        },
+        "equipment": {
+          "type": "object",
+          "description": "Equipped items"
+        },
+        "inventory": {
+          "type": "array",
+          "description": "Player inventory items"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last save timestamp"
+        }
+      },
+      "required": ["stats", "equipment", "inventory", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/saves/{saveId}": {
+      "schema": {
+        "$ref": "#/entities/UserSave"
+      },
+      "description": "User save game records"
+    }
+  }
+}

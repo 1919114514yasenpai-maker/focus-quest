@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'DotGothic16', 'Press Start 2P', monospace;
+    background-color: #090d16;
+    color: #e2e8f0;
+    overflow: hidden;
+  }
+}
+
+@layer components {
+  .pixel-panel {
+    @apply bg-slate-900/90 border-4 border-slate-700 p-4;
+    box-shadow: 
+      inset -4px -4px 0px 0px rgba(0,0,0,0.6),
+      inset 4px 4px 0px 0px rgba(255,255,255,0.1),
+      0 0 20px rgba(0,0,0,0.8);
+  }
+  
+  .pixel-btn {
+    @apply bg-slate-800 border-2 border-slate-600 text-slate-200 px-4 py-2 font-bold transition-all hover:border-amber-400 hover:text-amber-300 active:scale-95 disabled:opacity-50;
+    box-shadow: 
+      inset -2px -2px 0px 0px rgba(0,0,0,0.5),
+      inset 2px 2px 0px 0px rgba(255,255,255,0.15);
+  }
+
+  .pixel-btn.active {
+    @apply border-amber-400 text-amber-300 bg-amber-950/40 shadow-[0_0_12px_rgba(251,191,36,0.3)];
+  }
+}
