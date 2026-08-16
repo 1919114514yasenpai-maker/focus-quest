@@ -93,3 +93,16 @@ git push -u origin main --force
 echo "alias up='unzip -o \$(ls -t focus-quest*.zip 2>/dev/null | head -1) 2>/dev/null; git add -A && git commit -m \"update\" && git push origin main'" >> ~/.bashrc && source ~/.bashrc
 echo "alias up='unzip -o \$(ls -t *.zip | head -1) && git add -A && git commit -m \"update \$(ls -t *.zip | head -1)\" && git push origin main'" >> ~/.bashrc && source ~/.bashrc
 up
+gh auth login
+gh auth setup-git
+up
+git reset HEAD~1
+echo -e "\n.config/\n.cache/\n.*" >> .gitignore
+git reset .config .cache
+echo "alias up='unzip -o \$(ls -t *.zip | head -1) && git add src/ public/ index.html package.json vite.config.ts tsconfig*.json metadata.json firebase.json .firebaserc firestore.rules .gitignore && git commit -m \"update \$(ls -t *.zip | head -1)\" && git push origin main'" >> ~/.bashrc
+source ~/.bashrc
+up
+echo "alias up='unzip -o \$(ls -t *.zip | head -1) && git add -u && git add src/ && git commit -m \"update \$(ls -t *.zip | head -1)\" && git push origin main'" > ~/.bash_aliases
+source ~/.bashrc 2>/dev/null || true
+up
+unalias up 2>/dev/null; alias up='unzip -o $(ls -t *.zip | head -1) && git add -u && git add src/ && git commit -m "update $(ls -t *.zip | head -1)" && git push origin main'
