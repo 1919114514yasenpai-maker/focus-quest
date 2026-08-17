@@ -33,6 +33,11 @@ export function useCloudSave(
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
 
+  const onLoadedRef = useRef(onCloudDataLoaded);
+  useEffect(() => {
+    onLoadedRef.current = onCloudDataLoaded;
+  }, [onCloudDataLoaded]);
+
   const currentSaveRef = useRef<SaveData>(saveData);
   useEffect(() => {
     currentSaveRef.current = saveData;
@@ -76,7 +81,7 @@ export function useCloudSave(
           if (snapshot.exists()) {
             const data = snapshot.data();
             const sanitized = sanitizeSaveData(data);
-            onCloudDataLoaded(sanitized);
+            onLoadedRef.current(sanitized);
             setLastSyncedAt(data.updatedAt ? new Date(data.updatedAt).toLocaleTimeString() : 'クラウドから同期済み');
           } else {
             // First time user logged in: upload local save data to cloud
@@ -118,7 +123,7 @@ export function useCloudSave(
     });
 
     return () => unsubscribe();
-  }, [onCloudDataLoaded]);
+  }, []);
 
   // Sync to cloud
   const saveToCloud = useCallback(async (dataToSave: SaveData) => {
@@ -180,7 +185,7 @@ export function useCloudSave(
       if (snapshot.exists()) {
         const data = snapshot.data();
         const sanitized = sanitizeSaveData(data);
-        onCloudDataLoaded(sanitized);
+        onLoadedRef.current(sanitized);
         setLastSyncedAt(data.updatedAt ? new Date(data.updatedAt).toLocaleTimeString() : 'クラウドから同期済み');
       } else {
         setSyncError("クラウド上にセーブデータが見つかりませんでした。");
@@ -192,7 +197,7 @@ export function useCloudSave(
     } finally {
       setSyncing(false);
     }
-  }, [user, onCloudDataLoaded]);
+  }, [user]);
 
   const handleLogin = async () => {
     try {

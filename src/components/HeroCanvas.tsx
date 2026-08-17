@@ -169,7 +169,7 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
       if (lastMonsterId !== currentMonster.id) {
         lastMonsterId = currentMonster.id;
         currentEnemyHp = currentMonster.maxHp;
-        enemyX = canvas.width + 80;
+        enemyX = canvas.width + 100;
       }
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
