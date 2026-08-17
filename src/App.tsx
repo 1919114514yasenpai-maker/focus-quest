@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { HeroCanvas } from './components/HeroCanvas';
 import { Inventory } from './components/Inventory';
 import { Settings } from './components/Settings';
@@ -135,13 +135,26 @@ export default function App() {
     handleLogout,
   } = useCloudSave({ stats, equipment, inventory }, handleCloudDataLoaded);
 
+  const latestSaveDataRef = useRef<SaveData>({ stats, equipment, inventory });
+  useEffect(() => {
+    latestSaveDataRef.current = { stats, equipment, inventory };
+  }, [stats, equipment, inventory]);
+
+  // ローカル保存は状態変化ごとに即時実行（データ消失防止）
   useEffect(() => {
     const data: SaveData = { stats, equipment, inventory };
     localStorage.setItem(CURRENT_SAVE_KEY, JSON.stringify(data));
-    if (user) {
-      saveToCloud(data);
-    }
-  }, [stats, equipment, inventory, user]);
+  }, [stats, equipment, inventory]);
+
+  // クラウド同期はチカチカ防止のため「5分おき」に定期実行
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(() => {
+      saveToCloud(latestSaveDataRef.current);
+    }, 5 * 60 * 1000); // 5分ごと
+
+    return () => clearInterval(interval);
+  }, [user, saveToCloud]);
 
   const statArmorItem = getCompiledItem(inventory.find(i => i.uid === equipment.statArmorId));
   const statWeaponItem = getCompiledItem(inventory.find(i => i.uid === equipment.statWeaponId));
@@ -825,9 +838,8 @@ export default function App() {
         >
           ⚙️
           {user && (
-            <span className="absolute -top-1 -right-1 flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-sky-500 text-[8px] justify-center items-center text-white">☁</span>
+            <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-sky-500 text-[8px] text-white shadow-sm border border-slate-900">
+              ☁
             </span>
           )}
         </button>

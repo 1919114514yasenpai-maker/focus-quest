@@ -196,7 +196,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     </div>
                   </div>
                   <p className="text-[10px] text-emerald-400/90 bg-emerald-950/40 p-1.5 rounded border border-emerald-800/60">
-                    ✅ ログイン状態は自動で維持されます。次回以降も再認証なしでそのまま同期されます。
+                    ✅ ログイン中：5分おきに自動保存されます。「☁️ 今すぐ保存」で即時同期も可能です。
                   </p>
                 </div>
               ) : (
