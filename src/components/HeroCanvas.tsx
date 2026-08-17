@@ -161,6 +161,10 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
       elapsed += 1;
       const { isFocusing, isAsleep, statWeaponId, statArmorId, monster: currentMonster, onAttackMonster, onMonsterDefeated, onPlayerTakeDamage } = propsRef.current;
 
+      const groundY = canvas.height - 70;
+      const heroX = 180;
+      const heroY = groundY;
+
       // モンスター切り替え時のリセット
       if (lastMonsterId !== currentMonster.id) {
         lastMonsterId = currentMonster.id;
@@ -199,7 +203,6 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
       }
 
       // 3. 地面
-      const groundY = canvas.height - 70;
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(0, groundY, canvas.width, 70);
       
@@ -216,9 +219,6 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
         ctx.fillRect(Math.floor(x), groundY + 4, 16, 4);
         ctx.fillRect(Math.floor(x + 16), groundY + 24, 16, 4);
       }
-
-      const heroX = 180;
-      const heroY = groundY;
 
       // アニメーション計算
       const walkCycle = isRunning ? Math.sin(elapsed * 0.25) : 0;

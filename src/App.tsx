@@ -178,12 +178,19 @@ export default function App() {
   }, [calculatedMaxHp, statArmorItem, inventory.length]);
 
   useEffect(() => {
-    const hpRegen = (statArmorItem?.effect?.hpRegen || 1) + (statWeaponItem?.effect?.hpRegen || 0);
-    const weaponCurseHpDrain = statWeaponItem?.effect?.curseHpDrain || 0;
-    const armorCurseHpDrain = statArmorItem?.effect?.curseHpDrain || 0;
-    const totalCurseHpDrain = weaponCurseHpDrain + armorCurseHpDrain;
+    // 待機中 (idle) や 休憩中 (break) はキャンプ休息のため急速自然回復 (最大HPの10%/秒 または 30/秒)
+    // クエスト中 (focus) は 基礎回復 (5 + Lv依存) + 装備回復 - 呪い自傷
+    const isResting = timerMode === 'idle' || timerMode === 'break';
+    const baseRegen = isResting 
+      ? Math.max(30, Math.floor(stats.maxHp * 0.1)) 
+      : 5 + Math.floor(stats.level / 5) + (statArmorItem?.effect?.hpRegen || 1) + (statWeaponItem?.effect?.hpRegen || 0);
 
-    const netHpChange = hpRegen - totalCurseHpDrain;
+    // 呪い自傷ダメージはクエスト中のみ発生 (拠点待機中は安全)
+    const totalCurseHpDrain = isResting 
+      ? 0 
+      : (statWeaponItem?.effect?.curseHpDrain || 0) + (statArmorItem?.effect?.curseHpDrain || 0);
+
+    const netHpChange = baseRegen - totalCurseHpDrain;
 
     const interval = setInterval(() => {
       setStats(prev => {
@@ -207,7 +214,15 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [equipment.statArmorId, equipment.statWeaponId, statArmorItem?.effect?.hpRegen, statWeaponItem?.effect?.hpRegen, statArmorItem?.effect?.curseHpDrain, statWeaponItem?.effect?.curseHpDrain]);
+  }, [
+    timerMode, 
+    stats.maxHp, 
+    stats.level, 
+    statArmorItem?.effect?.hpRegen, 
+    statWeaponItem?.effect?.hpRegen, 
+    statArmorItem?.effect?.curseHpDrain, 
+    statWeaponItem?.effect?.curseHpDrain
+  ]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
