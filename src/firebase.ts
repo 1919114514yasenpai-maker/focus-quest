@@ -104,12 +104,13 @@ export async function testConnection() {
 }
 
 const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({
-  prompt: 'select_account'
-});
+// Note: Do not set prompt: 'select_account' so users stay signed in seamlessly without re-prompting every time
 
 export async function signInWithGoogle() {
   try {
+    if (typeof window !== 'undefined') {
+      await setPersistence(auth, browserLocalPersistence).catch(() => {});
+    }
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   } catch (error: any) {

@@ -15,7 +15,7 @@ import { SaveData } from './types';
 import { sanitizeSaveData } from './saveManager';
 
 // Timeout promise helper to prevent hanging when Firestore endpoint is blocked by MDM/firewall
-function withTimeout<T>(promise: Promise<T>, timeoutMs = 6000, errorMsg = 'タイムアウトしました'): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, timeoutMs = 12000, errorMsg = 'タイムアウトしました'): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) => setTimeout(() => reject(new Error(errorMsg)), timeoutMs))
@@ -64,8 +64,8 @@ export function useCloudSave(
           
           const snapshot = await withTimeout(
             getDoc(saveDocRef), 
-            6000, 
-            'Firestoreサーバーへの接続がタイムアウトしました。MDM・学校・組織のネットワークによりクラウド通信が遮断されている可能性があります。'
+            15000, 
+            'Firestoreサーバーへの接続がタイムアウトしました。'
           );
 
           if (snapshot.exists()) {
@@ -83,7 +83,7 @@ export function useCloudSave(
                 inventory: currentData.inventory,
                 updatedAt: new Date().toISOString(),
               }),
-              6000,
+              15000,
               'クラウドへのデータ保存がタイムアウトしました。'
             );
             setLastSyncedAt(new Date().toLocaleTimeString());
@@ -92,9 +92,11 @@ export function useCloudSave(
           console.error("Cloud sync load error:", err);
           const msg = err?.message || '';
           if (msg.includes('タイムアウト') || msg.includes('timeout')) {
-            setSyncError("⚠️ 通信タイムアウト：MDMやネットワーク制限によりFirestoreへの接続が遮断されています。「引継ぎコード」での移行をご利用ください。");
+            setSyncError("⚠️ 通信タイムアウト：MDM・ネットワーク制限または電波状況をご確認ください。「引継ぎコード」での移行も可能です。");
+          } else if (msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
+            setSyncError("⚠️ Firestore権限エラー：しばらく待ってから「☁️ 今すぐ保存」をお試しください。");
           } else {
-            setSyncError("クラウドデータの同期に失敗しました。");
+            setSyncError(`クラウドデータの同期に失敗しました: ${msg || '通信エラー'}`);
           }
           try {
             handleFirestoreError(err, OperationType.GET, `users/${currentUser.uid}/saves/default`);
@@ -129,7 +131,7 @@ export function useCloudSave(
           inventory: dataToSave.inventory,
           updatedAt: now,
         }),
-        6000,
+        15000,
         'クラウド同期がタイムアウトしました。'
       );
       setLastSyncedAt(new Date(now).toLocaleTimeString());
@@ -138,8 +140,10 @@ export function useCloudSave(
       const msg = err?.message || '';
       if (msg.includes('タイムアウト') || msg.includes('timeout')) {
         setSyncError("⚠️ クラウド保存がタイムアウトしました。MDM・学校等のネットワーク制限をご確認ください。");
+      } else if (msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
+        setSyncError("⚠️ Firestoreの書き込み権限エラーが発生しました。");
       } else {
-        setSyncError("クラウド同期エラーが発生しました");
+        setSyncError(`クラウド同期エラー: ${msg || '通信に失敗しました'}`);
       }
       try {
         handleFirestoreError(err, OperationType.WRITE, `users/${targetUser.uid}/saves/default`);
@@ -162,7 +166,7 @@ export function useCloudSave(
       const saveDocRef = doc(db, 'users', targetUser.uid, 'saves', 'default');
       const snapshot = await withTimeout(
         getDoc(saveDocRef), 
-        6000, 
+        15000, 
         'クラウドからのデータ読み込みがタイムアウトしました。'
       );
 
@@ -176,7 +180,8 @@ export function useCloudSave(
       }
     } catch (err: any) {
       console.error("Manual cloud load error:", err);
-      setSyncError("クラウドからの読み込みに失敗しました。");
+      const msg = err?.message || '';
+      setSyncError(`クラウドからの読み込みに失敗しました (${msg || '通信エラー'})`);
     } finally {
       setSyncing(false);
     }

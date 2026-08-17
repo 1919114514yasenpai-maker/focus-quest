@@ -163,7 +163,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 <div className="space-y-2 text-xs">
                   <div className="flex items-center justify-between text-slate-300 bg-slate-900/80 p-2 rounded border border-slate-800">
                     <div className="truncate max-w-[180px]">
-                      <p className="font-bold text-amber-300 truncate">{user.displayName || 'ログイン済み'}</p>
+                      <p className="font-bold text-amber-300 truncate">{user.displayName || 'ログイン維持中'}</p>
                       <p className="text-[10px] text-slate-400 truncate">{user.email}</p>
                     </div>
                     <button
@@ -195,11 +195,14 @@ export const Settings: React.FC<SettingsProps> = ({
                       </button>
                     </div>
                   </div>
+                  <p className="text-[10px] text-emerald-400/90 bg-emerald-950/40 p-1.5 rounded border border-emerald-800/60">
+                    ✅ ログイン状態は自動で維持されます。次回以降も再認証なしでそのまま同期されます。
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-2">
                   <p className="text-[11px] text-indigo-200 leading-tight">
-                    Googleアカウントでログインすると、スマホ・PC間でセーブデータを自動クラウド同期できます。
+                    スマホや別端末とセーブデータを共有したい場合のみログインしてください（1度ログインすれば次回以降も自動維持されます）。
                   </p>
                   <button
                     onClick={onLogin}
