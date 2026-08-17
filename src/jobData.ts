@@ -58,4 +58,15 @@ export const JOBS: Record<JobType, JobDefinition> = {
       '獲得EXP +10% ＆ 与ダメージ +10% UP',
     ],
   },
+  artisan: {
+    id: 'artisan',
+    name: '細工・鍛冶特化',
+    icon: '💎',
+    description: '武具の加工と宝石の取り扱いを極めた匠。武器の穴開け成功率が大幅に上昇します。',
+    perks: [
+      '武器への穴開け成功率 +30% UP',
+      '穴開け失敗時の素材ロスト確率半減',
+      'クラフト時の要求素材量 20% OFF' // 将来的な拡張や現在の仕様に合わせたおまけ
+    ],
+  },
 };

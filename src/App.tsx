@@ -156,8 +156,8 @@ export default function App() {
     return () => clearInterval(interval);
   }, [user, saveToCloud]);
 
-  const statArmorItem = getCompiledItem(inventory.find(i => i.uid === equipment.statArmorId));
-  const statWeaponItem = getCompiledItem(inventory.find(i => i.uid === equipment.statWeaponId));
+  const statArmorItem = getCompiledItem(inventory.find(i => i.uid === equipment.statArmorId), stats.hasCurseImmunity);
+  const statWeaponItem = getCompiledItem(inventory.find(i => i.uid === equipment.statWeaponId), stats.hasCurseImmunity);
 
   const maxHpBonus = statArmorItem?.effect?.maxHpBonus || 0;
   const calculatedMaxHp = 100 + (stats.level - 1) * 25 + maxHpBonus;
@@ -509,9 +509,118 @@ export default function App() {
       return;
     }
     const baseItem = ITEMS[item.baseId];
-    setStats(prev => ({ ...prev, gold: prev.gold - cost }));
+    setStats(prev => ({ ...prev, gold: prev.gold - cost, hasCurseImmunity: false }));
     setInventory(prev => prev.map(i => i.uid === uid ? { ...i, isUncursed: true } : i));
     showToast(`✨ 「${baseItem?.name || '装備'}」の呪いを解呪しました！マイナス効果が浄化され安全に強化できます。`);
+  };
+
+  const handleCraftCurseBreaker = () => {
+    const requiredMaterials = ['m_slime_jelly', 'm_goblin_ear', 'm_orc_fang', 'm_demon_horn', 'm_dragon_scale'];
+    const requiredCount = stats.job === 'artisan' ? 8 : 10;
+    
+    // Check if we have enough of each
+    const materialCounts: Record<string, number> = {};
+    inventory.forEach(item => {
+      if (requiredMaterials.includes(item.baseId)) {
+        materialCounts[item.baseId] = (materialCounts[item.baseId] || 0) + 1;
+      }
+    });
+
+    for (const mat of requiredMaterials) {
+      if ((materialCounts[mat] || 0) < requiredCount) {
+        showToast(`⚠️ 素材が足りません。(${ITEMS[mat].name}があと${requiredCount - (materialCounts[mat] || 0)}個必要)`);
+        return;
+      }
+    }
+
+    // Consume materials
+    let remainingToConsume: Record<string, number> = {};
+    requiredMaterials.forEach(m => remainingToConsume[m] = requiredCount);
+
+    setInventory(prev => {
+      let nextInv = [...prev];
+      requiredMaterials.forEach(matId => {
+        let count = requiredCount;
+        nextInv = nextInv.filter(item => {
+          if (item.baseId === matId && count > 0 && !item.isLocked) {
+            count--;
+            return false;
+          }
+          return true;
+        });
+      });
+      return [
+        ...nextInv,
+        { uid: generateUid(), baseId: 'c_curse_breaker', upgradeLevel: 0, addedPower: 0 }
+      ];
+    });
+    showToast(`📜 「呪い封じの護符」をクラフトしました！`);
+  };
+
+  const handleUseConsumable = (uid: string) => {
+    const item = inventory.find(i => i.uid === uid);
+    if (!item) return;
+    if (item.baseId === 'c_curse_breaker') {
+      setStats(prev => ({ ...prev, hasCurseImmunity: true }));
+      setInventory(prev => prev.filter(i => i.uid !== uid));
+      showToast(`✨ 呪い封じの護符を使用しました。解呪を行うまで呪い効果が無効化されます！`);
+    }
+  };
+
+  const handleOpenSocket = (uid: string) => {
+    const item = inventory.find(i => i.uid === uid);
+    if (!item || item.isLocked) return;
+    const baseItem = ITEMS[item.baseId];
+    if (baseItem.type !== 'weapon') return;
+
+    const currentSockets = item.unlockedSockets || 0;
+    if (currentSockets >= 3) {
+      showToast('⚠️ これ以上穴を開けることはできません。');
+      return;
+    }
+
+    // Cost logic - let's say it costs gold
+    const cost = 5000 * (currentSockets + 1);
+    if (stats.gold < cost) {
+      showToast(`⚠️ ゴールドが足りません。(必要: 🪙 ${cost} G)`);
+      return;
+    }
+
+    setStats(prev => ({ ...prev, gold: prev.gold - cost }));
+
+    // Success chance logic
+    let successRate = 0.5 - (currentSockets * 0.15); // 50%, 35%, 20%
+    if (stats.job === 'artisan') successRate += 0.3; // +30%
+
+    if (Math.random() < successRate) {
+      setInventory(prev => prev.map(i => i.uid === uid ? { ...i, unlockedSockets: currentSockets + 1 } : i));
+      showToast(`💎 武器に新しく宝石をはめる穴を開けました！`);
+    } else {
+      showToast(`💥 穴開けに失敗しました... (ゴールドを消費しました)`);
+      // If we wanted to destroy the weapon on fail, we could here, but let's just lose gold for now or maybe "robbing materials".
+    }
+  };
+
+  const handleInsertGem = (weaponUid: string, gemUid: string) => {
+    const weapon = inventory.find(i => i.uid === weaponUid);
+    const gem = inventory.find(i => i.uid === gemUid);
+    if (!weapon || !gem || ITEMS[gem.baseId].type !== 'gem' || weapon.isLocked) return;
+
+    const currentSockets = weapon.unlockedSockets || 0;
+    const currentGems = weapon.slottedGems || [];
+    if (currentGems.length >= currentSockets) {
+      showToast('⚠️ 空きスロットがありません。');
+      return;
+    }
+
+    setInventory(prev => prev.map(i => {
+      if (i.uid === weaponUid) {
+        return { ...i, slottedGems: [...currentGems, gem.baseId] };
+      }
+      return i;
+    }).filter(i => i.uid !== gemUid)); // consume gem
+
+    showToast(`✨ 武器に「${ITEMS[gem.baseId].name}」をはめ込みました！`);
   };
   
   const handleLimitBreak = (uid1: string, uid2: string) => {
@@ -631,6 +740,7 @@ export default function App() {
   const totalGoldBonus = (statWeaponItem?.effect?.goldBonus || 0) + (statArmorItem?.effect?.goldBonus || 0);
   const totalXpBonus = (statWeaponItem?.effect?.xpBonus || 0) + (statArmorItem?.effect?.xpBonus || 0);
 
+  if (stats.hasCurseImmunity) activeEffects.push(`📜 呪い無効化 (次回の解呪まで)`);
   if (statWeaponItem?.effect?.critChance) activeEffects.push(`会心率 +${Math.floor(statWeaponItem.effect.critChance * 100)}%`);
   if (totalGoldBonus > 0) activeEffects.push(`獲得G +${Math.floor(totalGoldBonus * 100)}%`);
   if (totalXpBonus > 0) activeEffects.push(`獲得EXP +${Math.floor(totalXpBonus * 100)}%`);
@@ -679,6 +789,7 @@ export default function App() {
           onPlayerTakeDamage={handlePlayerTakeDamage}
           inventory={inventory}
           job={stats.job || 'balanced'}
+          hasCurseImmunity={stats.hasCurseImmunity}
         />
       </div>
 
@@ -892,6 +1003,10 @@ export default function App() {
               onToggleLock={handleToggleLock}
               onUncurseItem={handleUncurseItem}
               onOpenChest={handleOpenChestItem}
+              onCraftCurseBreaker={handleCraftCurseBreaker}
+              onUseConsumable={handleUseConsumable}
+              onOpenSocket={handleOpenSocket}
+              onInsertGem={handleInsertGem}
               isQuestActive={timerMode === 'focus'}
             />
             <button onClick={() => setShowInventory(false)} className="pixel-btn w-full mt-4 py-2">

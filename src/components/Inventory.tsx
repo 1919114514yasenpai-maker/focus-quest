@@ -65,6 +65,10 @@ interface InventoryProps {
   onToggleLock?: (uid: string) => void;
   onUncurseItem?: (uid: string, cost: number) => void;
   onOpenChest?: (item: PlayerItem) => void;
+  onCraftCurseBreaker?: () => void;
+  onUseConsumable?: (uid: string) => void;
+  onOpenSocket?: (uid: string) => void;
+  onInsertGem?: (weaponUid: string, gemUid: string) => void;
   isQuestActive?: boolean;
 }
 
@@ -85,6 +89,10 @@ export const Inventory: React.FC<InventoryProps> = ({
   onToggleLock,
   onUncurseItem,
   onOpenChest,
+  onCraftCurseBreaker,
+  onUseConsumable,
+  onOpenSocket,
+  onInsertGem,
   isQuestActive = false,
 }) => {
   const [tab, setTab] = useState<'inventory' | 'shop' | 'dailyShop' | 'forge' | 'materials'>('inventory');
@@ -103,13 +111,13 @@ export const Inventory: React.FC<InventoryProps> = ({
   const chests = inventory.filter(i => ITEMS[i.baseId]?.type === 'chest');
   const nonEquipItems = inventory.filter(i => {
     const type = ITEMS[i.baseId]?.type;
-    return type === 'material' || type === 'chest';
+    return type === 'material' || type === 'chest' || type === 'gem' || type === 'consumable';
   });
 
   // ショップにはベースアイテムが並ぶ (素材・宝箱・呪い装備は除外)
   const shopItems = Object.values(ITEMS).filter(item => 
-    item.type !== 'material' && 
-    item.type !== 'chest' && 
+    item.type === 'weapon' || item.type === 'armor'
+  ).filter(item => 
     item.price > 0 && 
     !item.isCursed && 
     !item.effect?.isCursed
@@ -704,6 +712,89 @@ export const Inventory: React.FC<InventoryProps> = ({
             </div>
           </div>
 
+          {/* 宝石スロット (武器のみ) */}
+          {compiled.type === 'weapon' && (
+            <div className="bg-slate-950 p-3 rounded border border-slate-800 mb-3">
+              <h4 className="text-xs font-bold text-emerald-300 mb-2 border-b border-slate-800 pb-1 flex items-center justify-between">
+                <span>💎 宝石スロット ({detailPlayerItem.slottedGems?.length || 0}/{detailPlayerItem.unlockedSockets || 0})</span>
+              </h4>
+              
+              <div className="space-y-2 mb-3">
+                {Array.from({ length: Math.max(detailPlayerItem.unlockedSockets || 0, 1) }).map((_, idx) => {
+                  if (idx >= (detailPlayerItem.unlockedSockets || 0)) return null;
+                  const gemId = detailPlayerItem.slottedGems?.[idx];
+                  const gem = gemId ? ITEMS[gemId] : null;
+                  return (
+                    <div key={idx} className="flex items-center gap-2 p-2 bg-slate-900 border border-slate-800 rounded">
+                      <div className="w-6 h-6 rounded bg-slate-950 border border-slate-700 flex items-center justify-center flex-shrink-0">
+                        {gem ? '💎' : <span className="text-[10px] text-slate-600">空</span>}
+                      </div>
+                      <div className="flex-1 text-[10px]">
+                        {gem ? (
+                          <>
+                            <div className="font-bold text-slate-200">{gem.name}</div>
+                            <div className="text-sky-300">{gem.effect?.description}</div>
+                          </>
+                        ) : (
+                          <div className="text-slate-500">空きスロット</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {(detailPlayerItem.unlockedSockets || 0) === 0 && (
+                  <div className="text-[10px] text-slate-500 text-center py-2">
+                    スロットが空いていません。穴開けを行ってください。
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                {/* 穴開けボタン */}
+                {(detailPlayerItem.unlockedSockets || 0) < 3 && (
+                  <button
+                    onClick={() => {
+                      if (onOpenSocket) onOpenSocket(detailPlayerItem.uid);
+                      setDetailPlayerItem(null);
+                    }}
+                    disabled={detailPlayerItem.isLocked || isQuestActive || gold < 5000 * ((detailPlayerItem.unlockedSockets || 0) + 1)}
+                    className="pixel-btn text-[10px] w-full !bg-slate-800 active disabled:opacity-40"
+                  >
+                    ⛏️ 穴を開ける (🪙 {5000 * ((detailPlayerItem.unlockedSockets || 0) + 1)} G / 成功率 {Math.floor((0.5 - ((detailPlayerItem.unlockedSockets || 0) * 0.15) + (job === 'artisan' ? 0.3 : 0)) * 100)}%)
+                  </button>
+                )}
+                
+                {/* 宝石をはめるセレクト (空きスロットがある場合のみ表示) */}
+                {(detailPlayerItem.unlockedSockets || 0) > (detailPlayerItem.slottedGems?.length || 0) && (
+                  <div className="flex gap-2">
+                    <select 
+                      id="gem-select"
+                      className="pixel-input text-[10px] flex-1 !p-1 bg-slate-900 border border-slate-700 text-slate-300"
+                    >
+                      <option value="">宝石を選択...</option>
+                      {inventory.filter(i => ITEMS[i.baseId]?.type === 'gem' && !i.isLocked).map(i => (
+                        <option key={i.uid} value={i.uid}>{ITEMS[i.baseId].name}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => {
+                        const select = document.getElementById('gem-select') as HTMLSelectElement;
+                        if (select && select.value && onInsertGem) {
+                          onInsertGem(detailPlayerItem.uid, select.value);
+                          setDetailPlayerItem(null);
+                        }
+                      }}
+                      disabled={detailPlayerItem.isLocked || isQuestActive}
+                      className="pixel-btn text-[10px] !py-1 !bg-emerald-900 !text-emerald-100 !border-emerald-600 active disabled:opacity-40"
+                    >
+                      はめ込む
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* アクションボタン */}
           <div className="flex flex-col gap-2">
             {isCursedDetail && (
@@ -787,6 +878,7 @@ export const Inventory: React.FC<InventoryProps> = ({
     const baseMat = ITEMS[pItem.baseId];
     if (!baseMat) return null;
     const isChest = baseMat.type === 'chest';
+    const isConsumable = baseMat.type === 'consumable';
 
     return (
       <div key={pItem.uid} className={`pixel-panel flex flex-col gap-2 bg-slate-900/90 border-2 ${isChest ? 'border-amber-500/70 bg-slate-900/95' : 'border-slate-700'}`}>
@@ -796,6 +888,8 @@ export const Inventory: React.FC<InventoryProps> = ({
               <span className="text-xl select-none">
                 {baseMat.name.includes('伝説') ? '👑' : baseMat.name.includes('金') ? '🧰' : baseMat.name.includes('銀') ? '🎁' : '📦'}
               </span>
+            ) : isConsumable ? (
+              <span className="text-xl select-none">📜</span>
             ) : (
               <ItemIcon item={{ ...baseMat, id: pItem.baseId }} />
             )}
@@ -808,6 +902,15 @@ export const Inventory: React.FC<InventoryProps> = ({
               className="pixel-btn text-xs !py-1 !px-2 font-bold !bg-amber-500 !text-slate-950 !border-amber-300 hover:!bg-amber-400 active:scale-95 disabled:opacity-40"
             >
               🔓 開封
+            </button>
+          )}
+          {isConsumable && onUseConsumable && (
+            <button
+              onClick={() => onUseConsumable(pItem.uid)}
+              disabled={isQuestActive}
+              className="pixel-btn text-xs !py-1 !px-2 font-bold !bg-emerald-700 !text-emerald-100 hover:!bg-emerald-600 active:scale-95 disabled:opacity-40"
+            >
+              使用する
             </button>
           )}
         </div>
@@ -891,7 +994,30 @@ export const Inventory: React.FC<InventoryProps> = ({
         </div>
       ) : tab === 'materials' ? (
         <div>
-          <h3 className="text-sm font-bold text-amber-300 mb-3 border-b border-slate-800 pb-1">💎 所持素材・宝箱</h3>
+          <div className="mb-4 bg-slate-950 p-3 rounded border border-slate-800">
+            <h3 className="text-sm font-bold text-amber-300 mb-2 border-b border-slate-800 pb-1 flex items-center justify-between">
+              <span>🛠️ アイテムクラフト</span>
+            </h3>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-slate-100">📜 呪い封じの護符</div>
+                <div className="text-[10px] text-slate-400 mt-1">
+                  全5種のモンスタースライムゼリー等 各{job === 'artisan' ? 8 : 10}個
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (onCraftCurseBreaker) onCraftCurseBreaker();
+                }}
+                disabled={isQuestActive}
+                className="pixel-btn text-xs !py-1 !px-3 font-bold !bg-amber-600 !text-slate-100 !border-amber-400 active:scale-95 disabled:opacity-40"
+              >
+                作成する
+              </button>
+            </div>
+          </div>
+          
+          <h3 className="text-sm font-bold text-amber-300 mb-3 border-b border-slate-800 pb-1">💎 所持素材・宝箱・消費アイテム</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {nonEquipItems.length > 0 ? nonEquipItems.map(item => renderMaterialCard(item)) : <div className="text-xs text-slate-500">素材や宝箱を持っていません。集中クエストを完遂して宝箱を獲得しましょう！</div>}
           </div>

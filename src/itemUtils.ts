@@ -2,12 +2,12 @@ import { PlayerItem, GameItem, ItemEffect, JobType } from './types';
 import { ITEMS } from './gameData';
 import { getSellGoldMultiplier, getUncurseDiscountMultiplier } from './jobUtils';
 
-export const getCompiledItem = (playerItem: PlayerItem | undefined): GameItem | null => {
+export const getCompiledItem = (playerItem: PlayerItem | undefined, ignoreCurses: boolean = false): GameItem | null => {
   if (!playerItem) return null;
   const baseItem = ITEMS[playerItem.baseId];
   if (!baseItem) return null;
 
-  const isUncursed = !!playerItem.isUncursed;
+  const isUncursed = !!playerItem.isUncursed || ignoreCurses;
   const rawIsCursed = (baseItem.isCursed || baseItem.effect?.isCursed) && !isUncursed;
 
   // Name calculation
@@ -86,11 +86,30 @@ export const getCompiledItem = (playerItem: PlayerItem | undefined): GameItem | 
 
   const limitBreakPower = (playerItem.limitBreak || 0) * (baseItem.type === 'weapon' ? 10 : 8);
 
+  // Gem handling
+  let totalGemPower = 0;
+  if (playerItem.slottedGems && playerItem.slottedGems.length > 0) {
+    if (!effect) effect = { description: '' };
+    playerItem.slottedGems.forEach(gemId => {
+      const gem = ITEMS[gemId];
+      if (gem) {
+        totalGemPower += gem.power || 0;
+        if (gem.effect) {
+          effect!.description += `\n[${gem.name}] ${gem.effect.description}`;
+          if (gem.effect.elementalDamage) effect!.elementalDamage = (effect!.elementalDamage || 0) + gem.effect.elementalDamage;
+          if (gem.effect.elementalType) effect!.elementalType = gem.effect.elementalType; // Overwrite for simplicity or maybe stack? Overwrite is fine.
+          if (gem.effect.critChance) effect!.critChance = (effect!.critChance || 0) + gem.effect.critChance;
+          if (gem.effect.hpRegen) effect!.hpRegen = (effect!.hpRegen || 0) + gem.effect.hpRegen;
+        }
+      }
+    });
+  }
+
   return {
     ...baseItem,
     id: playerItem.uid,
     name,
-    power: baseItem.power + playerItem.addedPower + (playerItem.upgradeLevel * (baseItem.type === 'weapon' ? 3 : 2)) + limitBreakPower,
+    power: baseItem.power + playerItem.addedPower + (playerItem.upgradeLevel * (baseItem.type === 'weapon' ? 3 : 2)) + limitBreakPower + totalGemPower,
     isCursed: rawIsCursed,
     effect,
   };

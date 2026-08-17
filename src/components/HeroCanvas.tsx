@@ -15,6 +15,7 @@ interface HeroCanvasProps {
   monster: Monster;
   inventory: PlayerItem[];
   job?: JobType;
+  hasCurseImmunity?: boolean;
   onAttackMonster: (damage: number, isCrit: boolean, lifestealHeal: number) => void;
   onMonsterDefeated: (monster: Monster) => void;
   onPlayerTakeDamage: (damage: number) => void;
@@ -234,9 +235,9 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // 装備効果と職業効果の取得
-      const { inventory, job: currentJob } = propsRef.current;
-      const weaponItem = getCompiledItem(inventory.find(i => i.uid === statWeaponId));
-      const armorItem = getCompiledItem(inventory.find(i => i.uid === statArmorId));
+      const { inventory, job: currentJob, hasCurseImmunity } = propsRef.current;
+      const weaponItem = getCompiledItem(inventory.find(i => i.uid === statWeaponId), hasCurseImmunity);
+      const armorItem = getCompiledItem(inventory.find(i => i.uid === statArmorId), hasCurseImmunity);
 
       const jobDmgBonus = getDamageMultiplierBonus(currentJob, isFocusing);
       const jobCritBonus = getCritChanceBonus(currentJob);
@@ -246,6 +247,9 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
       const critChance = Math.min(1.0, (weaponItem?.effect?.critChance || 0) + (armorItem?.effect?.critChance || 0) + jobCritBonus);
       const lifesteal = Math.min(1.0, (weaponItem?.effect?.lifesteal || 0) + (armorItem?.effect?.lifesteal || 0));
       const enemySlowRate = Math.min(0.90, (weaponItem?.effect?.enemySlowRate || 0) + (armorItem?.effect?.enemySlowRate || 0));
+      
+      const elementalDamage = (weaponItem?.effect?.elementalDamage || 0) + (armorItem?.effect?.elementalDamage || 0);
+      const elementalType = weaponItem?.effect?.elementalType || armorItem?.effect?.elementalType || 'none';
 
       // 呪い等によるダメージ倍率補正 + 職業ダメージボーナス
       const baseDmgMult = 1 + (weaponItem?.effect?.damageMultiplier || 0) + (armorItem?.effect?.damageMultiplier || 0) + jobDmgBonus;
@@ -284,14 +288,24 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
 
           const isCrit = Math.random() < Math.max(0.01, 0.1 + critChance);
           const rawDmg = 12 + weaponPower * 5 + Math.floor(Math.random() * 8);
-          const baseDmg = Math.floor(rawDmg * dmgMult);
+          const baseDmg = Math.floor(rawDmg * dmgMult) + elementalDamage;
           const damage = isCrit ? Math.floor(baseDmg * 2.2) : baseDmg;
           const lifestealHeal = lifesteal > 0 ? Math.floor(damage * lifesteal) : 0;
 
           currentEnemyHp = Math.max(0, currentEnemyHp - damage);
 
-          spawnParticles(enemyX + 20, heroY - 40, isCrit ? '#f43f5e' : '#fbbf24', isCrit ? 20 : 12);
-          addFloatingText(isCrit ? `CRITICAL! -${damage}` : `-${damage}`, enemyX + 10, heroY - 60, isCrit ? '#f43f5e' : '#fbbf24');
+          const typeColors: Record<string, string> = {
+            'fire': '#ef4444',
+            'water': '#3b82f6',
+            'thunder': '#eab308',
+            'light': '#f8fafc',
+            'dark': '#1e293b',
+            'none': '#fbbf24'
+          };
+          const dmgColor = elementalDamage > 0 && elementalType !== 'none' ? typeColors[elementalType] : '#fbbf24';
+
+          spawnParticles(enemyX + 20, heroY - 40, isCrit ? '#f43f5e' : dmgColor, isCrit ? 20 : 12);
+          addFloatingText(isCrit ? `CRITICAL! -${damage}` : `-${damage}`, enemyX + 10, heroY - 60, isCrit ? '#f43f5e' : dmgColor);
 
           if (lifestealHeal > 0) {
             addFloatingText(`+${lifestealHeal} HP`, heroX - 10, heroY - 65, '#22c55e');

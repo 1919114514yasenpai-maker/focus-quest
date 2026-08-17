@@ -1,4 +1,4 @@
-export type ItemType = 'weapon' | 'armor' | 'material' | 'chest';
+export type ItemType = 'weapon' | 'armor' | 'material' | 'chest' | 'gem' | 'consumable';
 
 export interface ItemEffect {
   description: string;
@@ -12,13 +12,15 @@ export interface ItemEffect {
   curseHpDrain?: number; // 毎秒受ける呪いダメージ
   damageMultiplier?: number; // 例: -0.4 (与ダメージ40%ダウン)
   enemySlowRate?: number; // 粘り属性等: 敵の攻撃速度遅延率 (例: 0.2 => 敵攻撃周期+20%)
+  elementalDamage?: number; // 属性ダメージ追加 (宝石効果など)
+  elementalType?: 'fire' | 'water' | 'thunder' | 'light' | 'dark'; // 属性の種類
 }
 
 export interface GameItem {
   id: string;
   name: string;
   type: ItemType;
-  power: number;         // 攻撃力または防御力
+  power: number;         // 攻撃力または防御力 (宝石の場合は属性攻撃力等にも使用)
   price: number;         // ショップでの購入価格
   color: string;         // レンダリング用カラー
   effect?: ItemEffect;   // 特殊効果
@@ -42,7 +44,7 @@ export interface Monster {
   drops?: MonsterDrop[];
 }
 
-export type JobType = 'merchant' | 'miner' | 'appraiser' | 'warrior' | 'balanced';
+export type JobType = 'merchant' | 'miner' | 'appraiser' | 'warrior' | 'balanced' | 'artisan';
 
 export interface JobDefinition {
   id: JobType;
@@ -62,6 +64,7 @@ export interface PlayerStats {
   maxStageReached: number; // 到達した最高階層
   job?: JobType;          // 特化職 (デフォルト: balanced)
   lastJobChangeLevel?: number; // 最後に転職の機会を行使/確認したレベル (貯められない)
+  hasCurseImmunity?: boolean; // 呪い封じの護符による一時的な呪い無効化バフ
 }
 
 export interface EquipmentState {
@@ -82,6 +85,8 @@ export interface PlayerItem {
   addedEffect?: ItemEffect;
   isLocked?: boolean;
   isUncursed?: boolean;
+  unlockedSockets?: number; // 解放済みの穴の数
+  slottedGems?: string[];   // はめ込まれた宝石のbaseIdリスト
 }
 
 export interface SaveData {

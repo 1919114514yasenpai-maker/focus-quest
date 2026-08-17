@@ -357,6 +357,64 @@ export const ITEMS: Record<string, GameItem> = {
     effect: { description: '特殊強化に使用する素材。究極の強化が可能。' }
   },
 
+  // --- 宝石 (GEMS) ---
+  'g_fire_ruby': {
+    id: 'g_fire_ruby',
+    name: '炎のルビー',
+    type: 'gem',
+    power: 10,
+    price: 800,
+    color: '#ef4444',
+    effect: { description: '武器の穴に嵌めると、炎属性ダメージ(+10)を付与する。', elementalDamage: 10, elementalType: 'fire' }
+  },
+  'g_water_sapphire': {
+    id: 'g_water_sapphire',
+    name: '水のサファイア',
+    type: 'gem',
+    power: 10,
+    price: 800,
+    color: '#3b82f6',
+    effect: { description: '武器の穴に嵌めると、水属性ダメージ(+10)を付与する。', elementalDamage: 10, elementalType: 'water' }
+  },
+  'g_thunder_topaz': {
+    id: 'g_thunder_topaz',
+    name: '雷のトパーズ',
+    type: 'gem',
+    power: 10,
+    price: 800,
+    color: '#eab308',
+    effect: { description: '武器の穴に嵌めると、雷属性ダメージ(+10)を付与する。', elementalDamage: 10, elementalType: 'thunder' }
+  },
+  'g_light_diamond': {
+    id: 'g_light_diamond',
+    name: '光のダイヤモンド',
+    type: 'gem',
+    power: 15,
+    price: 2000,
+    color: '#f8fafc',
+    effect: { description: '武器の穴に嵌めると、光属性ダメージ(+15)を付与する。', elementalDamage: 15, elementalType: 'light' }
+  },
+  'g_dark_onyx': {
+    id: 'g_dark_onyx',
+    name: '闇のオニキス',
+    type: 'gem',
+    power: 15,
+    price: 2000,
+    color: '#1e293b',
+    effect: { description: '武器の穴に嵌めると、闇属性ダメージ(+15)を付与する。', elementalDamage: 15, elementalType: 'dark' }
+  },
+
+  // --- 消費アイテム (CONSUMABLES) ---
+  'c_curse_breaker': {
+    id: 'c_curse_breaker',
+    name: '呪い封じの護符',
+    type: 'consumable',
+    power: 0,
+    price: 3000,
+    color: '#facc15',
+    effect: { description: 'クラフトで作成。次に「解呪」を行うまで一時的に装備の呪い効果（自傷ダメージやステータス低下など）を無効化する。' }
+  },
+
   // --- 宝箱 (CHESTS) ---
   'm_chest_wooden': {
     id: 'm_chest_wooden',
@@ -476,6 +534,14 @@ export const getMonsterForStage = (stage: number): Monster => {
     dragon: 'm_dragon_scale'
   };
 
+  const dropGems: Record<string, string> = {
+    slime: 'g_water_sapphire',
+    goblin: 'g_thunder_topaz',
+    orc: 'g_fire_ruby',
+    demon: 'g_dark_onyx',
+    dragon: 'g_light_diamond'
+  };
+
   return {
     id: `monster_stage_${stage}_${Math.random().toString(36).substring(2, 6)}`,
     name,
@@ -486,7 +552,8 @@ export const getMonsterForStage = (stage: number): Monster => {
     goldReward,
     spriteType,
     drops: [
-      { itemId: dropMaterials[spriteType], chance: 0.2 + (stage % 3) * 0.1 } // 20%~40% drop chance
+      { itemId: dropMaterials[spriteType], chance: 0.2 + (stage % 3) * 0.1 }, // 20%~40% drop chance
+      { itemId: dropGems[spriteType], chance: 0.05 + Math.min(stage * 0.001, 0.1) } // 5%~15% rare gem drop
     ]
   };
 };
