@@ -6,15 +6,3 @@ coverage/
 *.log
 .env*
 !.env.example
-
-.bash_history
-.bashrc
-.firebase/
-.gemini/
-.cache/
-.config/
-.npm/
-*.zip
-firebase-debug.log
-node_modules/
-dist/

@@ -48,6 +48,11 @@ export function useCloudSave(
     });
   }, []);
 
+  // Helper to remove any undefined fields before sending to Firestore
+  const cleanForFirestore = (obj: any): any => {
+    return JSON.parse(JSON.stringify(obj, (_, value) => (value === undefined ? null : value)));
+  };
+
   // Listen to auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -76,13 +81,14 @@ export function useCloudSave(
           } else {
             // First time user logged in: upload local save data to cloud
             const currentData = currentSaveRef.current;
+            const payload = cleanForFirestore({
+              stats: currentData.stats,
+              equipment: currentData.equipment,
+              inventory: currentData.inventory,
+              updatedAt: new Date().toISOString(),
+            });
             await withTimeout(
-              setDoc(saveDocRef, {
-                stats: currentData.stats,
-                equipment: currentData.equipment,
-                inventory: currentData.inventory,
-                updatedAt: new Date().toISOString(),
-              }),
+              setDoc(saveDocRef, payload),
               15000,
               'クラウドへのデータ保存がタイムアウトしました。'
             );
@@ -124,13 +130,14 @@ export function useCloudSave(
       setSyncError(null);
       const saveDocRef = doc(db, 'users', targetUser.uid, 'saves', 'default');
       const now = new Date().toISOString();
+      const payload = cleanForFirestore({
+        stats: dataToSave.stats,
+        equipment: dataToSave.equipment,
+        inventory: dataToSave.inventory,
+        updatedAt: now,
+      });
       await withTimeout(
-        setDoc(saveDocRef, {
-          stats: dataToSave.stats,
-          equipment: dataToSave.equipment,
-          inventory: dataToSave.inventory,
-          updatedAt: now,
-        }),
+        setDoc(saveDocRef, payload),
         15000,
         'クラウド同期がタイムアウトしました。'
       );
