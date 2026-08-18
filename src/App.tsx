@@ -514,35 +514,41 @@ export default function App() {
     showToast(`✨ 「${baseItem?.name || '装備'}」の呪いを解呪しました！マイナス効果が浄化され安全に強化できます。`);
   };
 
-  const handleCraftCurseBreaker = () => {
-    const requiredMaterials = ['m_slime_jelly', 'm_goblin_ear', 'm_orc_fang', 'm_demon_horn', 'm_dragon_scale'];
-    const requiredCount = stats.job === 'artisan' ? 8 : 10;
-    
-    // Check if we have enough of each
+  const handleCraftItem = (targetBaseId: string) => {
+    let requiredMaterials: { id: string, count: number }[] = [];
+
+    if (targetBaseId === 'c_curse_breaker') {
+      const requiredCount = stats.job === 'artisan' ? 8 : 10;
+      requiredMaterials = ['m_slime_jelly', 'm_goblin_ear', 'm_orc_fang', 'm_demon_horn', 'm_dragon_scale'].map(id => ({ id, count: requiredCount }));
+    } else if (targetBaseId === 'w_craft_ragnarok' || targetBaseId === 'a_craft_aegis') {
+      const matCount = stats.job === 'artisan' ? 40 : 50;
+      const gemCount = stats.job === 'artisan' ? 4 : 5;
+      requiredMaterials = [
+        ...['m_slime_jelly', 'm_goblin_ear', 'm_orc_fang', 'm_demon_horn', 'm_dragon_scale'].map(id => ({ id, count: matCount })),
+        ...['g_fire_ruby', 'g_water_sapphire', 'g_thunder_topaz', 'g_light_diamond', 'g_dark_onyx'].map(id => ({ id, count: gemCount }))
+      ];
+    } else {
+      return; // Unknown recipe
+    }
+
     const materialCounts: Record<string, number> = {};
     inventory.forEach(item => {
-      if (requiredMaterials.includes(item.baseId)) {
-        materialCounts[item.baseId] = (materialCounts[item.baseId] || 0) + 1;
-      }
+      materialCounts[item.baseId] = (materialCounts[item.baseId] || 0) + 1;
     });
 
-    for (const mat of requiredMaterials) {
-      if ((materialCounts[mat] || 0) < requiredCount) {
-        showToast(`⚠️ 素材が足りません。(${ITEMS[mat].name}があと${requiredCount - (materialCounts[mat] || 0)}個必要)`);
+    for (const req of requiredMaterials) {
+      if ((materialCounts[req.id] || 0) < req.count) {
+        showToast(`⚠️ 素材が足りません。(${ITEMS[req.id].name}があと${req.count - (materialCounts[req.id] || 0)}個必要)`);
         return;
       }
     }
 
-    // Consume materials
-    let remainingToConsume: Record<string, number> = {};
-    requiredMaterials.forEach(m => remainingToConsume[m] = requiredCount);
-
     setInventory(prev => {
       let nextInv = [...prev];
-      requiredMaterials.forEach(matId => {
-        let count = requiredCount;
+      requiredMaterials.forEach(req => {
+        let count = req.count;
         nextInv = nextInv.filter(item => {
-          if (item.baseId === matId && count > 0 && !item.isLocked) {
+          if (item.baseId === req.id && count > 0 && !item.isLocked) {
             count--;
             return false;
           }
@@ -551,10 +557,10 @@ export default function App() {
       });
       return [
         ...nextInv,
-        { uid: generateUid(), baseId: 'c_curse_breaker', upgradeLevel: 0, addedPower: 0 }
+        { uid: generateUid(), baseId: targetBaseId, upgradeLevel: 0, addedPower: 0 }
       ];
     });
-    showToast(`📜 「呪い封じの護符」をクラフトしました！`);
+    showToast(`✨ 「${ITEMS[targetBaseId].name}」をクラフトしました！`);
   };
 
   const handleUseConsumable = (uid: string) => {
@@ -564,7 +570,39 @@ export default function App() {
       setStats(prev => ({ ...prev, hasCurseImmunity: true }));
       setInventory(prev => prev.filter(i => i.uid !== uid));
       showToast(`✨ 呪い封じの護符を使用しました。解呪を行うまで呪い効果が無効化されます！`);
+    } else if (item.baseId === 'c_transfer_scroll') {
+      // Inventory UI側でモーダルを開く処理をトリガーするため、ここでは何もせず、Inventory側のステートで管理させるか、
+      // あるいは、ここはUIに関わらないロジックだけ。Inventory.tsx で onUseConsumable(uid) されたら Modalを開くようにする。
+      // なので、この処理は空でよい。Inventory.tsx側で捕まえる。
     }
+  };
+
+  const handleTransferEnhancements = (sourceUid: string, targetUid: string, scrollUid: string) => {
+    const source = inventory.find(i => i.uid === sourceUid);
+    const target = inventory.find(i => i.uid === targetUid);
+    if (!source || !target) return;
+    if (ITEMS[source.baseId].type !== ITEMS[target.baseId].type) {
+      showToast('⚠️ 同じ種類（武器同士、または防具同士）にしか継承できません。');
+      return;
+    }
+
+    setInventory(prev => prev.map(i => {
+      if (i.uid === targetUid) {
+        return {
+          ...i,
+          upgradeLevel: source.upgradeLevel || 0,
+          limitBreak: source.limitBreak || 0,
+          addedPower: source.addedPower || 0,
+          addedEffect: source.addedEffect,
+          specialEnchantCount: source.specialEnchantCount || 0,
+          unlockedSockets: source.unlockedSockets || 0,
+          slottedGems: source.slottedGems || []
+        };
+      }
+      return i;
+    }).filter(i => i.uid !== sourceUid && i.uid !== scrollUid));
+    
+    showToast(`✨ 「${ITEMS[source.baseId].name}」から「${ITEMS[target.baseId].name}」へ強化状態を継承しました！`);
   };
 
   const handleOpenSocket = (uid: string) => {
@@ -1003,10 +1041,11 @@ export default function App() {
               onToggleLock={handleToggleLock}
               onUncurseItem={handleUncurseItem}
               onOpenChest={handleOpenChestItem}
-              onCraftCurseBreaker={handleCraftCurseBreaker}
+              onCraftItem={handleCraftItem}
               onUseConsumable={handleUseConsumable}
               onOpenSocket={handleOpenSocket}
               onInsertGem={handleInsertGem}
+              onTransferEnhancements={handleTransferEnhancements}
               isQuestActive={timerMode === 'focus'}
             />
             <button onClick={() => setShowInventory(false)} className="pixel-btn w-full mt-4 py-2">

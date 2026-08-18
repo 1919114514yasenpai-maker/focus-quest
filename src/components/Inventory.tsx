@@ -65,10 +65,11 @@ interface InventoryProps {
   onToggleLock?: (uid: string) => void;
   onUncurseItem?: (uid: string, cost: number) => void;
   onOpenChest?: (item: PlayerItem) => void;
-  onCraftCurseBreaker?: () => void;
+  onCraftItem?: (recipeId: string) => void;
   onUseConsumable?: (uid: string) => void;
   onOpenSocket?: (uid: string) => void;
   onInsertGem?: (weaponUid: string, gemUid: string) => void;
+  onTransferEnhancements?: (sourceUid: string, targetUid: string, scrollUid: string) => void;
   isQuestActive?: boolean;
 }
 
@@ -89,10 +90,11 @@ export const Inventory: React.FC<InventoryProps> = ({
   onToggleLock,
   onUncurseItem,
   onOpenChest,
-  onCraftCurseBreaker,
+  onCraftItem,
   onUseConsumable,
   onOpenSocket,
   onInsertGem,
+  onTransferEnhancements,
   isQuestActive = false,
 }) => {
   const [tab, setTab] = useState<'inventory' | 'shop' | 'dailyShop' | 'forge' | 'materials'>('inventory');
@@ -100,6 +102,9 @@ export const Inventory: React.FC<InventoryProps> = ({
   const [detailPlayerItem, setDetailPlayerItem] = useState<PlayerItem | null>(null);
   const [dismantleConfirmItem, setDismantleConfirmItem] = useState<{ item: PlayerItem; gameItem: GameItem } | null>(null);
   const [uncurseConfirmItem, setUncurseConfirmItem] = useState<{ item: PlayerItem; gameItem: GameItem; cost: number } | null>(null);
+  const [transferScrollUid, setTransferScrollUid] = useState<string | null>(null);
+  const [transferSourceUid, setTransferSourceUid] = useState<string>('');
+  const [transferTargetUid, setTransferTargetUid] = useState<string>('');
   
   const todayStr = getTodayDateString();
   const dailyItems = generateDailyShopItems(todayStr);
@@ -116,11 +121,12 @@ export const Inventory: React.FC<InventoryProps> = ({
 
   // ショップにはベースアイテムが並ぶ (素材・宝箱・呪い装備は除外)
   const shopItems = Object.values(ITEMS).filter(item => 
-    item.type === 'weapon' || item.type === 'armor'
+    item.type === 'weapon' || item.type === 'armor' || item.id === 'c_transfer_scroll'
   ).filter(item => 
     item.price > 0 && 
     !item.isCursed && 
-    !item.effect?.isCursed
+    !item.effect?.isCursed &&
+    !item.id.includes('craft_')
   );
 
   // Initialize selected material if none is selected
@@ -232,8 +238,34 @@ export const Inventory: React.FC<InventoryProps> = ({
     const isCursedItem = (item.isCursed || baseItemDef?.isCursed) && !pItem.isUncursed;
     const uncurseCost = calculateUncurseCost(pItem, job);
 
+    let cardBorderColor = "border-slate-700";
+    let cardShadow = "";
+    let cardBg = "bg-slate-900/90";
+    
+    if ((pItem.limitBreak || 0) >= 1) {
+      cardBorderColor = "border-rose-500";
+      cardBg = "bg-slate-950";
+      cardShadow = "shadow-[0_0_15px_rgba(244,63,94,0.4)]";
+    } else if (pItem.upgradeLevel >= 15) {
+      cardBorderColor = "border-fuchsia-500";
+      cardBg = "bg-slate-950";
+      cardShadow = "shadow-[0_0_12px_rgba(217,70,239,0.4)]";
+    } else if (pItem.upgradeLevel >= 10) {
+      cardBorderColor = "border-amber-400";
+      cardShadow = "shadow-[0_0_10px_rgba(251,191,36,0.3)]";
+    } else if (pItem.upgradeLevel >= 5) {
+      cardBorderColor = "border-sky-400";
+      cardShadow = "shadow-[0_0_8px_rgba(56,189,248,0.2)]";
+    } else if (pItem.upgradeLevel >= 1 || (pItem.addedPower || 0) > 0) {
+      cardBorderColor = "border-emerald-500";
+      cardShadow = "shadow-[0_0_5px_rgba(16,185,129,0.15)]";
+    } else if (pItem.baseId.includes('craft')) {
+      cardBorderColor = "border-amber-600";
+      cardShadow = "shadow-[0_0_8px_rgba(217,119,6,0.3)]";
+    }
+
     return (
-      <div key={item.id} className="pixel-panel flex flex-col gap-2 bg-slate-900/90 border-2 border-slate-700 relative">
+      <div key={item.id} className={`pixel-panel flex flex-col gap-2 border-2 ${cardBg} ${cardBorderColor} ${cardShadow} relative transition-all duration-300 hover:scale-[1.01]`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ItemIcon item={{ ...item, id: pItem.baseId }} />
@@ -906,7 +938,13 @@ export const Inventory: React.FC<InventoryProps> = ({
           )}
           {isConsumable && onUseConsumable && (
             <button
-              onClick={() => onUseConsumable(pItem.uid)}
+              onClick={() => {
+                if (baseMat.id === 'c_transfer_scroll') {
+                  setTransferScrollUid(pItem.uid);
+                } else {
+                  onUseConsumable(pItem.uid);
+                }
+              }}
               disabled={isQuestActive}
               className="pixel-btn text-xs !py-1 !px-2 font-bold !bg-emerald-700 !text-emerald-100 hover:!bg-emerald-600 active:scale-95 disabled:opacity-40"
             >
@@ -998,22 +1036,61 @@ export const Inventory: React.FC<InventoryProps> = ({
             <h3 className="text-sm font-bold text-amber-300 mb-2 border-b border-slate-800 pb-1 flex items-center justify-between">
               <span>🛠️ アイテムクラフト</span>
             </h3>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-bold text-slate-100">📜 呪い封じの護符</div>
-                <div className="text-[10px] text-slate-400 mt-1">
-                  全5種のモンスタースライムゼリー等 各{job === 'artisan' ? 8 : 10}個
+            
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div>
+                  <div className="text-sm font-bold text-slate-100">📜 呪い封じの護符</div>
+                  <div className="text-[10px] text-slate-400 mt-1">
+                    全5種のモンスター素材 各{job === 'artisan' ? 8 : 10}個
+                  </div>
                 </div>
+                <button
+                  onClick={() => {
+                    if (onCraftItem) onCraftItem('c_curse_breaker');
+                  }}
+                  disabled={isQuestActive}
+                  className="pixel-btn text-xs !py-1 !px-3 font-bold !bg-amber-600 !text-slate-100 !border-amber-400 active:scale-95 disabled:opacity-40"
+                >
+                  作成
+                </button>
               </div>
-              <button
-                onClick={() => {
-                  if (onCraftCurseBreaker) onCraftCurseBreaker();
-                }}
-                disabled={isQuestActive}
-                className="pixel-btn text-xs !py-1 !px-3 font-bold !bg-amber-600 !text-slate-100 !border-amber-400 active:scale-95 disabled:opacity-40"
-              >
-                作成する
-              </button>
+
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div>
+                  <div className="text-sm font-bold text-rose-300">⚔️ 終焉剣ラグナロク</div>
+                  <div className="text-[10px] text-slate-400 mt-1">
+                    全5種の素材 各{job === 'artisan' ? 40 : 50}個<br/>+ 全5種の属性宝石 各{job === 'artisan' ? 4 : 5}個
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    if (onCraftItem) onCraftItem('w_craft_ragnarok');
+                  }}
+                  disabled={isQuestActive}
+                  className="pixel-btn text-xs !py-1 !px-3 font-bold !bg-rose-900 !text-rose-100 !border-rose-500 active:scale-95 disabled:opacity-40"
+                >
+                  鍛造
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-bold text-sky-300">🛡️ 創星盾イージス</div>
+                  <div className="text-[10px] text-slate-400 mt-1">
+                    全5種の素材 各{job === 'artisan' ? 40 : 50}個<br/>+ 全5種の属性宝石 各{job === 'artisan' ? 4 : 5}個
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    if (onCraftItem) onCraftItem('a_craft_aegis');
+                  }}
+                  disabled={isQuestActive}
+                  className="pixel-btn text-xs !py-1 !px-3 font-bold !bg-sky-900 !text-sky-100 !border-sky-500 active:scale-95 disabled:opacity-40"
+                >
+                  鍛造
+                </button>
+              </div>
             </div>
           </div>
           
@@ -1051,6 +1128,78 @@ export const Inventory: React.FC<InventoryProps> = ({
       )}
 
       {renderDetailModal()}
+
+      {transferScrollUid && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="pixel-panel max-w-md w-full bg-slate-900 border-2 border-purple-500 p-5 relative text-slate-100 shadow-[0_0_25px_rgba(168,85,247,0.3)]">
+            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-slate-800 text-purple-400 font-bold">
+              <span className="text-xl">📜</span>
+              <h3 className="text-sm font-bold">強化の継承</h3>
+            </div>
+            <p className="text-xs text-slate-200 mb-3 leading-relaxed">
+              抽出元（失われる）と継承先（強化される）の装備を選択してください。<br/>
+              <span className="text-rose-400">※同じ種類（武器同士、防具同士）のみ継承可能です。</span>
+            </p>
+            
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="block text-[10px] text-purple-300 mb-1">抽出元（消滅します）:</label>
+                <select 
+                  value={transferSourceUid}
+                  onChange={(e) => setTransferSourceUid(e.target.value)}
+                  className="pixel-input text-xs w-full p-2 bg-slate-950 border border-slate-700 text-slate-200"
+                >
+                  <option value="">選択してください...</option>
+                  {ownedItems.filter(i => !inventory.find(inv => inv.uid === i.id)?.isLocked).map(item => (
+                    <option key={item.id} value={item.id}>{item.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-sky-300 mb-1">継承先（上書きされます）:</label>
+                <select 
+                  value={transferTargetUid}
+                  onChange={(e) => setTransferTargetUid(e.target.value)}
+                  className="pixel-input text-xs w-full p-2 bg-slate-950 border border-slate-700 text-slate-200"
+                >
+                  <option value="">選択してください...</option>
+                  {ownedItems.filter(i => !inventory.find(inv => inv.uid === i.id)?.isLocked && i.id !== transferSourceUid).map(item => (
+                    <option key={item.id} value={item.id}>{item.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  if (onTransferEnhancements && transferSourceUid && transferTargetUid) {
+                    onTransferEnhancements(transferSourceUid, transferTargetUid, transferScrollUid);
+                  }
+                  setTransferScrollUid(null);
+                  setTransferSourceUid('');
+                  setTransferTargetUid('');
+                }}
+                disabled={!transferSourceUid || !transferTargetUid}
+                className="pixel-btn text-xs flex-1 !bg-purple-900 !text-purple-100 !border-purple-500 active disabled:opacity-40"
+              >
+                継承を実行する
+              </button>
+              <button
+                onClick={() => {
+                  setTransferScrollUid(null);
+                  setTransferSourceUid('');
+                  setTransferTargetUid('');
+                }}
+                className="pixel-btn text-xs flex-1 !bg-slate-800 !text-slate-300 !border-slate-600 active"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {dismantleConfirmItem && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">

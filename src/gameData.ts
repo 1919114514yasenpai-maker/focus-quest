@@ -2,6 +2,15 @@ import { GameItem, Monster, PlayerItem, ItemType } from './types';
 
 export const ITEMS: Record<string, GameItem> = {
   // --- 武器 (WEAPONS) ---
+  'w_craft_ragnarok': {
+    id: 'w_craft_ragnarok',
+    name: '終焉剣ラグナロク',
+    type: 'weapon',
+    power: 500,
+    price: 15000000,
+    color: '#fb7185',
+    effect: { description: '【クラフト限定】世界の終焉と創生を司る神剣。圧倒的な破壊力と自己再生力を併せ持つ。', critChance: 0.3, lifesteal: 0.1, damageMultiplier: 2.0, hpRegen: 50 }
+  },
   'w_wood_sword': {
     id: 'w_wood_sword',
     name: 'ひのきのぼう',
@@ -130,6 +139,15 @@ export const ITEMS: Record<string, GameItem> = {
   },
 
   // --- 防具 (ARMORS) ---
+  'a_craft_aegis': {
+    id: 'a_craft_aegis',
+    name: '創星盾イージス',
+    type: 'armor',
+    power: 300,
+    price: 15000000,
+    color: '#38bdf8',
+    effect: { description: '【クラフト限定】星々の加護を受けた神の盾。あらゆる災厄を弾き返し、装備者に無限の活力を与える。', maxHpBonus: 5000, hpRegen: 200, damageMultiplier: 1.0, critChance: 0.1 }
+  },
   'a_cloth': {
     id: 'a_cloth',
     name: 'ぬののふく',
@@ -405,6 +423,15 @@ export const ITEMS: Record<string, GameItem> = {
   },
 
   // --- 消費アイテム (CONSUMABLES) ---
+  'c_transfer_scroll': {
+    id: 'c_transfer_scroll',
+    name: '強化継承の秘伝書',
+    type: 'consumable',
+    power: 0,
+    price: 30000000,
+    color: '#a855f7',
+    effect: { description: '【ショップ限定品】元の武器・防具から強化した部分（基本強化値・限界突破・特殊強化・開けた穴・はめた宝石）だけを抜き取り、別の同じ種類の装備に移せる。抽出元の装備品は消滅する。' }
+  },
   'c_curse_breaker': {
     id: 'c_curse_breaker',
     name: '呪い封じの護符',
