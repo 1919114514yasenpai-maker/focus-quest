@@ -10,7 +10,7 @@ interface ItemIconProps {
   item: GameItem;
 }
 
-const ItemIcon: React.FC<ItemIconProps> = ({ item }) => {
+export const ItemIcon: React.FC<ItemIconProps> = ({ item }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {

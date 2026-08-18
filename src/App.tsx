@@ -5,6 +5,8 @@ import { Settings } from './components/Settings';
 import { ChestModal } from './components/ChestModal';
 import { StageSelectModal } from './components/StageSelectModal';
 import { JobSelectModal } from './components/JobSelectModal';
+import { GuildRanking } from './components/GuildRanking';
+import { AuctionHouse } from './components/AuctionHouse';
 import { PlayerStats, EquipmentState, SaveData, Monster, PlayerItem, ChestReward, JobType } from './types';
 import { INITIAL_INVENTORY, ITEMS, getNextLevelXp, getMonsterForStage, generateUid } from './gameData';
 import { getCompiledItem } from './itemUtils';
@@ -21,6 +23,8 @@ import {
   getNextJobChangeLevel
 } from './jobUtils';
 import { useCloudSave } from './useCloudSave';
+import { db, auth } from './firebase';
+import { doc, getDoc, updateDoc, setDoc, increment } from 'firebase/firestore';
 
 import { DailyShopItem } from './dailyShopUtils';
 
@@ -41,6 +45,8 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showStageSelect, setShowStageSelect] = useState(false);
   const [showJobModal, setShowJobModal] = useState(false);
+  const [showGuildRanking, setShowGuildRanking] = useState(false);
+  const [showAuctionHouse, setShowAuctionHouse] = useState(false);
   const [isJobMilestoneTrigger, setIsJobMilestoneTrigger] = useState(false);
 
   const [pendingChestReward, setPendingChestReward] = useState<ChestReward | null>(null);
@@ -255,6 +261,62 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
+  const updateWeeklyFocusTime = async (minutes: number) => {
+    if (!auth.currentUser) return;
+    const currentWeekId = `2026-W${Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000))}`;
+    try {
+      const userRef = doc(db, "users", auth.currentUser.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const data = userSnap.data();
+        if (data.weekId !== currentWeekId) {
+          await updateDoc(userRef, {
+            weekId: currentWeekId,
+            weeklyFocusTime: minutes,
+            totalFocusTime: increment(minutes)
+          });
+          if (data.guildId) {
+            const guildRef = doc(db, "guilds", data.guildId);
+            const guildSnap = await getDoc(guildRef);
+            if (guildSnap.exists()) {
+              if (guildSnap.data().weekId !== currentWeekId) {
+                await updateDoc(guildRef, { weekId: currentWeekId, weeklyFocusTime: minutes });
+              } else {
+                await updateDoc(guildRef, { weeklyFocusTime: increment(minutes) });
+              }
+            }
+          }
+        } else {
+          await updateDoc(userRef, { 
+            weeklyFocusTime: increment(minutes),
+            totalFocusTime: increment(minutes)
+          });
+          if (data.guildId) {
+            const guildRef = doc(db, "guilds", data.guildId);
+            const guildSnap = await getDoc(guildRef);
+            if (guildSnap.exists()) {
+              if (guildSnap.data().weekId !== currentWeekId) {
+                await updateDoc(guildRef, { weekId: currentWeekId, weeklyFocusTime: minutes });
+              } else {
+                await updateDoc(guildRef, { weeklyFocusTime: increment(minutes) });
+              }
+            }
+          }
+        }
+      } else {
+        await setDoc(userRef, {
+          displayName: auth.currentUser.displayName || "名無し勇者",
+          weeklyFocusTime: minutes,
+          totalFocusTime: minutes,
+          weekId: currentWeekId,
+          guildId: ""
+        });
+      }
+    } catch (e) {
+      console.error("Failed to update weekly focus time", e);
+    }
+  };
+
   const handleTimerComplete = () => {
     if (timerMode === 'focus') {
       const chestId = getChestForFocusMinutes(focusMinutes);
@@ -267,6 +329,7 @@ export default function App() {
       };
 
       setInventory(prev => [...prev, newChestItem]);
+      updateWeeklyFocusTime(focusMinutes);
       showToast(`🎁 集中達成！「${chestItem?.name || '宝箱'}」を素材欄に獲得しました！（素材欄からいつでも開封できます）`);
 
       setStats(prev => ({ ...prev, hp: prev.maxHp }));
@@ -991,6 +1054,12 @@ export default function App() {
           );
         })()}
 
+        <button onClick={() => setShowGuildRanking(true)} className="pixel-btn text-xs sm:text-sm px-2 sm:px-3 py-2 sm:py-2.5" title="ギルドランキング">
+          🛡️
+        </button>
+        <button onClick={() => setShowAuctionHouse(true)} className="pixel-btn text-xs sm:text-sm px-2 sm:px-3 py-2 sm:py-2.5" title="グローバルオークション">
+          ⚖️
+        </button>
         <button onClick={() => setShowInventory(!showInventory)} className="pixel-btn text-xs sm:text-sm px-4 sm:px-6 py-2 sm:py-2.5">
           🎒 装備と工房 {timerMode === 'focus' && '🔒'}
         </button>
@@ -1063,6 +1132,8 @@ export default function App() {
         />
       )}
 
+      {showGuildRanking && <GuildRanking onClose={() => setShowGuildRanking(false)} />}
+      {showAuctionHouse && <AuctionHouse onClose={() => setShowAuctionHouse(false)} inventory={inventory} gold={stats.gold} onRefreshGold={(amount) => setStats(s => ({ ...s, gold: Math.max(0, s.gold + amount) }))} onReceiveItem={(item) => setInventory(inv => [...inv, item])} onRemoveItem={(uid) => setInventory(inv => inv.filter(i => i.uid !== uid))} />}
       {showSettings && (
         <Settings 
           onClose={() => setShowSettings(false)} 

@@ -1,7 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
     match /{document=**} {
       allow read, write: if false;
     }
@@ -9,21 +8,45 @@ service cloud.firestore {
     function isSignedIn() {
       return request.auth != null;
     }
-
+    
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
+    
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
 
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      // Public profiles for rankings (No PII here)
+      allow read: if isSignedIn();
+      allow create: if isOwner(userId) && 
+                       incoming().keys().hasAll(['displayName', 'weeklyFocusTime', 'weekId', 'totalFocusTime']) &&
+                       incoming().displayName is string && incoming().displayName.size() <= 50;
+      allow update: if isOwner(userId);
 
       match /saves/{saveId} {
         allow read, write: if isOwner(userId);
       }
     }
 
-    match /test/connection {
-      allow read: if true;
+    match /guilds/{guildId} {
+      // Public guilds for rankings
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && 
+                       incoming().leaderId == request.auth.uid &&
+                       incoming().keys().hasAll(['name', 'leaderId', 'weeklyFocusTime', 'weekId', 'memberCount', 'createdAt']) &&
+                       incoming().name is string && incoming().name.size() <= 50;
+      // Anyone can update to increment focus time or join/leave
+      allow update: if isSignedIn(); 
+    }
+
+    match /market/{itemId} {
+      // Public market
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && 
+                       incoming().sellerId == request.auth.uid &&
+                       incoming().keys().hasAll(['sellerId', 'sellerName', 'itemData', 'currentBid', 'expiresAt', 'status', 'createdAt']);
+      allow update: if isSignedIn(); 
     }
   }
 }
