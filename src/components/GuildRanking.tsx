@@ -151,7 +151,14 @@ export const GuildRanking: React.FC<GuildRankingProps> = ({ onClose, inventory, 
   }, []);
 
   const handleCreateGuild = async () => {
-    if (!auth.currentUser || !newGuildName.trim()) return;
+    if (!auth.currentUser) {
+      alert('ギルドを作成するにはログインが必要です');
+      return;
+    }
+    if (!newGuildName.trim()) {
+      alert('ギルド名を入力してください');
+      return;
+    }
     if (isPrivate && !inviteCode.trim()) {
       alert('プライベートギルドには招待コードが必要です');
       return;
@@ -169,25 +176,64 @@ export const GuildRanking: React.FC<GuildRankingProps> = ({ onClose, inventory, 
       inviteCode: isPrivate ? inviteCode.trim() : ''
     };
     try {
+      // 1. Create the guild document
       await setDoc(doc(db, 'guilds', guildId), newGuild);
-      await setDoc(doc(db, 'users', auth.currentUser.uid), {
-        guildId: guildId,
-        displayName: auth.currentUser.displayName || '名無し勇者'
-      }, { merge: true });
-      fetchData();
+
+      // 2. Decrement old guild if changing from another guild
+      if (userProfile?.guildId && userProfile.guildId !== guildId) {
+        try {
+          const oldGuildRef = doc(db, 'guilds', userProfile.guildId);
+          const oldSnap = await getDoc(oldGuildRef);
+          if (oldSnap.exists()) {
+            const count = oldSnap.data()?.memberCount || 1;
+            await updateDoc(oldGuildRef, {
+              memberCount: Math.max(0, count - 1)
+            });
+          }
+        } catch (err) {
+          console.warn('Failed to decrement old guild:', err);
+        }
+      }
+
+      // 3. Ensure user document is properly created/merged
+      const userRef = doc(db, 'users', auth.currentUser.uid);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        await setDoc(userRef, {
+          displayName: auth.currentUser.displayName || '名無し勇者',
+          weeklyFocusTime: 0,
+          weekId: currentWeekId,
+          totalFocusTime: 0,
+          guildId: guildId
+        });
+      } else {
+        await setDoc(userRef, {
+          displayName: auth.currentUser.displayName || userSnap.data()?.displayName || '名無し勇者',
+          guildId: guildId
+        }, { merge: true });
+      }
+
       setNewGuildName('');
       setInviteCode('');
-    } catch (e) {
-      console.error(e);
-      alert('ギルド作成に失敗しました');
+      await fetchData();
+      alert(`✨ ギルド「${newGuild.name}」を設立しました！`);
+    } catch (e: any) {
+      console.error('Guild create error:', e);
+      alert(`ギルド作成に失敗しました: ${e?.message || e}`);
     }
   };
 
   const handleJoinGuild = async (guildId: string, checkCode?: string) => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser) {
+      alert('ギルドに加入するにはログインが必要です');
+      return;
+    }
     try {
       const targetGuildDoc = await getDoc(doc(db, 'guilds', guildId));
-      if (!targetGuildDoc.exists()) return;
+      if (!targetGuildDoc.exists()) {
+        alert('ギルドが見つかりませんでした');
+        return;
+      }
       const tg = targetGuildDoc.data() as Guild;
       
       if (tg.memberCount >= 10) {
@@ -199,22 +245,60 @@ export const GuildRanking: React.FC<GuildRankingProps> = ({ onClose, inventory, 
         return;
       }
 
-      if (userProfile?.guildId) {
-        await updateDoc(doc(db, 'guilds', userProfile.guildId), {
-          memberCount: increment(-1)
-        });
+      if (userProfile?.guildId === guildId) {
+        alert('既にこのギルドに加入しています');
+        return;
       }
-      await updateDoc(doc(db, 'guilds', guildId), {
-        memberCount: increment(1)
-      });
-      await setDoc(doc(db, 'users', auth.currentUser.uid), {
-        guildId: guildId,
-        displayName: auth.currentUser.displayName || '名無し勇者'
-      }, { merge: true });
-      fetchData();
-    } catch (e) {
-      console.error(e);
-      alert('ギルド加入に失敗しました');
+
+      // 1. Decrement old guild if changing
+      if (userProfile?.guildId) {
+        try {
+          const oldGuildRef = doc(db, 'guilds', userProfile.guildId);
+          const oldSnap = await getDoc(oldGuildRef);
+          if (oldSnap.exists()) {
+            const count = oldSnap.data()?.memberCount || 1;
+            await updateDoc(oldGuildRef, {
+              memberCount: Math.max(0, count - 1)
+            });
+          }
+        } catch (err) {
+          console.warn('Failed to decrement old guild:', err);
+        }
+      }
+
+      // 2. Increment new guild
+      const currentCount = tg.memberCount || 0;
+      const updateData: any = {
+        memberCount: currentCount + 1
+      };
+      if (!tg.leaderId) {
+        updateData.leaderId = auth.currentUser.uid;
+      }
+      await updateDoc(doc(db, 'guilds', guildId), updateData);
+
+      // 3. Update user document
+      const userRef = doc(db, 'users', auth.currentUser.uid);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        await setDoc(userRef, {
+          displayName: auth.currentUser.displayName || '名無し勇者',
+          weeklyFocusTime: 0,
+          weekId: currentWeekId,
+          totalFocusTime: 0,
+          guildId: guildId
+        });
+      } else {
+        await setDoc(userRef, {
+          displayName: auth.currentUser.displayName || userSnap.data()?.displayName || '名無し勇者',
+          guildId: guildId
+        }, { merge: true });
+      }
+
+      await fetchData();
+      alert(`✨ ギルド「${tg.name}」に加入しました！`);
+    } catch (e: any) {
+      console.error('Guild join error:', e);
+      alert(`ギルド加入に失敗しました: ${e?.message || e}`);
     }
   };
 
@@ -254,9 +338,9 @@ export const GuildRanking: React.FC<GuildRankingProps> = ({ onClose, inventory, 
           memberCount: increment(-1)
         });
       }
-      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+      await setDoc(doc(db, 'users', auth.currentUser.uid), {
         guildId: ''
-      });
+      }, { merge: true });
       setMyGuild(null);
       setMyGuildMembers([]);
       fetchData();
@@ -272,9 +356,9 @@ export const GuildRanking: React.FC<GuildRankingProps> = ({ onClose, inventory, 
         await updateDoc(doc(db, 'guilds', myGuild.id), {
           memberCount: increment(-1)
         });
-        await updateDoc(doc(db, 'users', memberId), {
+        await setDoc(doc(db, 'users', memberId), {
           guildId: ''
-        });
+        }, { merge: true });
         fetchData();
       } catch (e) {
         console.error(e);

@@ -18,10 +18,7 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create: if isOwner(userId) && 
-                       incoming().keys().hasAll(['displayName', 'weeklyFocusTime', 'weekId', 'totalFocusTime']) &&
-                       incoming().displayName is string && incoming().displayName.size() <= 50;
-      allow update: if isOwner(userId);
+      allow create, update: if isOwner(userId);
 
       match /saves/{saveId} {
         allow read, write: if isOwner(userId);
@@ -30,12 +27,9 @@ service cloud.firestore {
 
     match /guilds/{guildId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && 
-                       incoming().leaderId == request.auth.uid &&
-                       incoming().keys().hasAll(['name', 'leaderId', 'weeklyFocusTime', 'weekId', 'memberCount', 'createdAt', 'isPrivate', 'inviteCode']) &&
-                       incoming().name is string && incoming().name.size() <= 50;
+      allow create: if isSignedIn();
       allow update: if isSignedIn();
-      allow delete: if isSignedIn(); // Let client delete if empty
+      allow delete: if isSignedIn();
 
       match /votes/{voterId} {
         allow read: if isSignedIn();

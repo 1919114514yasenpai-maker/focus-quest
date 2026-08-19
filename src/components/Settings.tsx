@@ -66,10 +66,10 @@ export const Settings: React.FC<SettingsProps> = ({
         const guildData = {
           id: gid,
           name: st.name,
-          leaderId: user.uid,
+          leaderId: '',
           weeklyFocusTime: st.focus,
           weekId: currentWeekId,
-          memberCount: 1,
+          memberCount: 0,
           createdAt: new Date().toISOString(),
           isPrivate: false,
           inviteCode: ''
