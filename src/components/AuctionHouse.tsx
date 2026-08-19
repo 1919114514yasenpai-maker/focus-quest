@@ -31,7 +31,23 @@ interface AuctionHouseProps {
   onRemoveItem: (uid: string) => void;
 }
 
-// Safely normalize a PlayerItem so missing fields don't cause crashes
+// Safely remove any undefined values for Firestore serialization
+const sanitizeForFirestore = (obj: any): any => {
+  if (obj === null || obj === undefined) return null;
+  if (Array.isArray(obj)) return obj.map(sanitizeForFirestore);
+  if (typeof obj === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== undefined) {
+        cleaned[key] = sanitizeForFirestore(value);
+      }
+    }
+    return cleaned;
+  }
+  return obj;
+};
+
+// Safely normalize a PlayerItem so missing or undefined fields don't cause crashes or Firestore errors
 const normalizePlayerItem = (rawItem: any): PlayerItem => {
   if (!rawItem) {
     return {
@@ -41,38 +57,73 @@ const normalizePlayerItem = (rawItem: any): PlayerItem => {
       addedPower: 0,
     };
   }
-  return {
-    ...rawItem,
+  const baseId = rawItem.baseId || rawItem.itemId || 'w_wood_sword';
+  const cleanItem: PlayerItem = {
     uid: rawItem.uid || generateUid(),
-    baseId: rawItem.baseId || rawItem.itemId || 'w_wood_sword',
-    upgradeLevel: rawItem.upgradeLevel || rawItem.plus || 0,
-    addedPower: rawItem.addedPower || 0,
+    baseId,
+    upgradeLevel: Number(rawItem.upgradeLevel ?? rawItem.plus) || 0,
+    addedPower: Number(rawItem.addedPower) || 0,
   };
+  if (rawItem.isLocked !== undefined) cleanItem.isLocked = Boolean(rawItem.isLocked);
+  if (rawItem.limitBreak !== undefined && rawItem.limitBreak !== null) cleanItem.limitBreak = Number(rawItem.limitBreak);
+  if (rawItem.specialEnchantCount !== undefined && rawItem.specialEnchantCount !== null) cleanItem.specialEnchantCount = Number(rawItem.specialEnchantCount);
+  if (rawItem.customPrefix) cleanItem.customPrefix = String(rawItem.customPrefix);
+  if (rawItem.addedEffect) cleanItem.addedEffect = rawItem.addedEffect;
+  if (rawItem.engraving) cleanItem.engraving = String(rawItem.engraving);
+  if (rawItem.isUncursed !== undefined && rawItem.isUncursed !== null) cleanItem.isUncursed = Boolean(rawItem.isUncursed);
+  if (rawItem.unlockedSockets !== undefined && rawItem.unlockedSockets !== null) cleanItem.unlockedSockets = Number(rawItem.unlockedSockets);
+  if (rawItem.slottedGems !== undefined && Array.isArray(rawItem.slottedGems)) cleanItem.slottedGems = rawItem.slottedGems;
+  return cleanItem;
 };
 
-const getSafeCompiledItem = (pItem: PlayerItem): GameItem => {
+const getSafeCompiledItem = (pItem: PlayerItem): GameItem & { baseId?: string } => {
   const normalized = normalizePlayerItem(pItem);
-  const compiled = getCompiledItem(normalized);
-  if (compiled) return compiled;
-
   const base = ITEMS[normalized.baseId];
-  if (base) {
+  
+  if (!base) {
     return {
-      ...base,
       id: normalized.uid,
-      name: base.name,
-      power: base.power + (normalized.addedPower || 0),
+      baseId: normalized.baseId,
+      name: '未知のアイテム',
+      type: 'material',
+      power: 0,
+      price: 10,
+      color: '#94a3b8',
     };
   }
 
+  // If it's a weapon or armor, getCompiledItem handles prefixes, upgrades, gems, etc.
+  if (base.type === 'weapon' || base.type === 'armor') {
+    const compiled = getCompiledItem(normalized);
+    if (compiled) {
+      return { ...compiled, baseId: normalized.baseId };
+    }
+  }
+
+  // If it's a chest, material, gem, consumable
+  let name = base.name;
+  if (normalized.customPrefix) name = `${normalized.customPrefix}${name}`;
+  if (normalized.upgradeLevel > 0) name = `${name} +${normalized.upgradeLevel}`;
+
   return {
+    ...base,
     id: normalized.uid,
-    name: '未知のアイテム',
-    type: 'weapon',
-    power: 1,
-    price: 10,
-    color: '#94a3b8',
+    baseId: normalized.baseId,
+    name,
+    power: base.power + (normalized.addedPower || 0),
   };
+};
+
+const getItemTypeLabel = (type: string) => {
+  switch (type) {
+    case 'weapon': return '⚔️ 武器';
+    case 'armor': return '🛡️ 防具';
+    case 'chest': return '🧰 宝箱';
+    case 'gem': return '💎 宝石';
+    case 'consumable': return '📜 消費/巻物';
+    case 'material': return '📦 素材';
+    default: return 'アイテム';
+  }
 };
 
 export const AuctionHouse: React.FC<AuctionHouseProps> = ({
@@ -86,6 +137,7 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
   const [items, setItems] = useState<MarketItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'buy' | 'sell' | 'my'>('buy');
+  const [filterType, setFilterType] = useState<string>('all');
 
   // Sell state
   const [selectedSellItem, setSelectedSellItem] = useState<PlayerItem | null>(null);
@@ -173,7 +225,8 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
         createdAt: new Date().toISOString(),
       };
 
-      await setDoc(doc(db, 'market', marketId), newItem);
+      // Safely serialize data so no undefined field ever breaks Firestore setDoc
+      await setDoc(doc(db, 'market', marketId), sanitizeForFirestore(newItem));
       onRemoveItem(selectedSellItem.uid);
       setSelectedSellItem(null);
       setTab('buy');
@@ -233,7 +286,7 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
       if (isBuyout) {
         alert('🎉 即決価格で購入しました！「取引状況」タブからアイテムを受け取ってください。');
       } else {
-        alert(`💰 ${bidAmount} G で入札しました！`);
+        alert(`💰 ${bidAmount.toLocaleString()} G で入札しました！`);
       }
     } catch (e: any) {
       console.error('Bid error:', e);
@@ -302,6 +355,13 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
     return `${h}時間${m}分`;
   };
 
+  const filteredBuyItems = items.filter(i => {
+    if (i.status !== 'active' || i.sellerId === auth.currentUser?.uid) return false;
+    if (filterType === 'all') return true;
+    const base = ITEMS[i.itemData.baseId];
+    return base?.type === filterType;
+  });
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
       <div className="pixel-panel max-w-4xl w-full bg-slate-900 border-2 border-amber-600 p-3 sm:p-5 relative text-slate-100 shadow-[0_0_25px_rgba(217,119,6,0.3)] h-[90vh] flex flex-col">
@@ -315,7 +375,7 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
           </div>
         </div>
 
-        <div className="flex gap-2 mb-4 flex-shrink-0">
+        <div className="flex gap-2 mb-3 flex-shrink-0">
           <button
             onClick={() => setTab('buy')}
             className={`pixel-btn flex-1 text-xs sm:text-sm py-2 ${tab === 'buy' ? '!bg-amber-700 !border-amber-500' : '!bg-slate-800 !text-slate-400'}`}
@@ -336,14 +396,37 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
           </button>
         </div>
 
+        {tab === 'buy' && (
+          <div className="flex gap-1 mb-3 overflow-x-auto pb-1 flex-shrink-0">
+            {[
+              { id: 'all', label: 'すべて' },
+              { id: 'weapon', label: '⚔️ 武器' },
+              { id: 'armor', label: '🛡️ 防具' },
+              { id: 'chest', label: '🧰 宝箱' },
+              { id: 'gem', label: '💎 宝石' },
+              { id: 'consumable', label: '📜 スクロール' },
+              { id: 'material', label: '📦 素材' },
+            ].map(f => (
+              <button
+                key={f.id}
+                onClick={() => setFilterType(f.id)}
+                className={`pixel-btn text-[10px] sm:text-xs !py-1 !px-2 whitespace-nowrap ${filterType === f.id ? '!bg-amber-600 text-white' : '!bg-slate-800 !text-slate-400'}`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto pr-1">
           {loading ? (
             <div className="text-center py-10 text-amber-500 animate-pulse font-bold">取引情報を読み込み中...</div>
           ) : tab === 'sell' ? (
             <div className="space-y-4">
               <div className="bg-slate-950 p-4 border border-slate-700 rounded">
-                <h3 className="text-sm font-bold text-amber-400 mb-3">出品するアイテムを選択</h3>
-                <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto p-1">
+                <h3 className="text-sm font-bold text-amber-400 mb-2">出品するアイテムを選択</h3>
+                <p className="text-[10px] text-slate-400 mb-3">武具・宝箱・宝石・スクロール・素材など、所持アイテムを出品できます。</p>
+                <div className="flex flex-wrap gap-2 max-h-52 overflow-y-auto p-1">
                   {inventory.filter(i => !i.isLocked).map(pItem => {
                     const compiled = getSafeCompiledItem(pItem);
                     const isSelected = selectedSellItem?.uid === pItem.uid;
@@ -351,7 +434,7 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
                       <div
                         key={pItem.uid}
                         onClick={() => setSelectedSellItem(pItem)}
-                        className={`relative cursor-pointer p-1.5 border-2 rounded transition-all ${
+                        className={`relative cursor-pointer p-1.5 border-2 rounded transition-all flex items-center gap-1.5 ${
                           isSelected
                             ? 'border-amber-400 bg-amber-950/60 shadow-[0_0_10px_rgba(251,191,36,0.5)]'
                             : 'border-slate-700 bg-slate-900 hover:border-slate-500'
@@ -359,8 +442,11 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
                         title={compiled.name}
                       >
                         <ItemIcon item={compiled} />
+                        <span className="text-[11px] font-bold text-slate-200 max-w-[100px] truncate">
+                          {compiled.name}
+                        </span>
                         {pItem.upgradeLevel > 0 && (
-                          <span className="absolute -top-1 -right-1 text-[9px] bg-sky-600 text-white font-bold px-1 rounded">
+                          <span className="absolute -top-1 -right-1 text-[9px] bg-sky-600 text-white font-bold px-1 rounded shadow">
                             +{pItem.upgradeLevel}
                           </span>
                         )}
@@ -369,7 +455,7 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
                   })}
                   {inventory.filter(i => !i.isLocked).length === 0 && (
                     <div className="text-xs text-slate-400 py-4">
-                      出品可能なアイテムがありません（ロック中のアイテムや装備中は出品できません）
+                      出品可能なアイテムがありません（ロック中のアイテムは出品できません）
                     </div>
                   )}
                 </div>
@@ -377,14 +463,19 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
 
               {selectedSellItem && (() => {
                 const compiled = getSafeCompiledItem(selectedSellItem);
+                const base = ITEMS[selectedSellItem.baseId];
                 return (
                   <div className="bg-slate-950 p-4 border border-amber-800 space-y-4 rounded">
                     <div className="flex items-center gap-3">
-                      <ItemIcon item={compiled} />
-                      <div>
-                        <div className="font-bold text-sm text-slate-100">{compiled.name}</div>
-                        <div className="text-xs text-slate-400">
-                          種別: {compiled.type === 'weapon' ? '武器' : compiled.type === 'armor' ? '防具' : 'アイテム'} | 威力/防御: {compiled.power} | 定価: {compiled.price} G
+                      <ItemIcon item={compiled} size={40} />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-sm text-slate-100 truncate">{compiled.name}</div>
+                        <div className="text-xs text-slate-400 mt-0.5">
+                          {getItemTypeLabel(compiled.type)}
+                          {compiled.type === 'weapon' && ` | 攻撃力: +${compiled.power}`}
+                          {compiled.type === 'armor' && ` | 防御力: +${compiled.power}`}
+                          {base?.effect && ` | 効果: ${base.effect.description}`}
+                          {compiled.price > 0 && ` | 定価: 🪙 ${compiled.price} G`}
                         </div>
                       </div>
                     </div>
@@ -423,7 +514,7 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
                         </select>
                       </div>
                     </div>
-                    <button onClick={handleSell} className="pixel-btn active w-full py-2.5 sm:py-3 font-bold">
+                    <button onClick={handleSell} className="pixel-btn active w-full py-2.5 sm:py-3 font-bold !bg-amber-600 hover:!bg-amber-500">
                       出品する
                     </button>
                   </div>
@@ -432,31 +523,38 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
             </div>
           ) : tab === 'buy' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {items.filter(i => i.status === 'active' && i.sellerId !== auth.currentUser?.uid).map(item => {
+              {filteredBuyItems.map(item => {
                 const compiled = getSafeCompiledItem(item.itemData);
                 const currentPrice = Math.max(item.currentBid, item.startingBid);
+                const base = ITEMS[item.itemData.baseId];
                 return (
-                  <div key={item.id} className="bg-slate-950 border border-slate-700 p-3 flex flex-col gap-2 rounded">
+                  <div key={item.id} className="bg-slate-950 border border-slate-700 p-3 flex flex-col gap-2 rounded hover:border-slate-500 transition-colors">
                     <div className="flex items-start gap-3">
-                      <ItemIcon item={compiled} />
+                      <ItemIcon item={compiled} size={36} />
                       <div className="flex-1 min-w-0">
                         <div className="font-bold text-xs sm:text-sm text-slate-100 truncate">
                           {compiled.name}
                         </div>
-                        <div className="text-[10px] text-slate-400">出品者: {item.sellerName}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {getItemTypeLabel(compiled.type)}
+                          {compiled.type === 'weapon' && ` · 攻+${compiled.power}`}
+                          {compiled.type === 'armor' && ` · 防+${compiled.power}`}
+                          {base?.effect && ` · ${base.effect.description}`}
+                        </div>
+                        <div className="text-[10px] text-slate-500">出品者: {item.sellerName}</div>
                         {item.itemData.engraving && (
-                          <div className="text-[10px] text-indigo-300 mt-0.5">🛡️ 刻印: {item.itemData.engraving}</div>
+                          <div className="text-[10px] text-indigo-300">🛡️ 刻印: {item.itemData.engraving}</div>
                         )}
-                        <div className="text-[10px] text-rose-400 mt-0.5">残り時間: {formatTimeLeft(item.expiresAt)}</div>
+                        <div className="text-[10px] text-rose-400 font-bold">残り時間: {formatTimeLeft(item.expiresAt)}</div>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2 mt-auto pt-2 border-t border-slate-800">
                       <div>
-                        <div className="text-[10px] text-slate-400">現在価格 (最低: {item.startingBid} G)</div>
+                        <div className="text-[10px] text-slate-400">現在価格 (最低: {item.startingBid.toLocaleString()} G)</div>
                         <div className="font-bold text-amber-400 text-xs sm:text-sm">{currentPrice.toLocaleString()} G</div>
                         <button
                           onClick={() => handleBid(item, Math.max(item.currentBid + 10, item.startingBid))}
-                          className="pixel-btn text-[10px] w-full mt-1 !py-1"
+                          className="pixel-btn text-[10px] w-full mt-1 !py-1 !bg-slate-800 hover:!bg-slate-700"
                         >
                           入札 (+10G)
                         </button>
@@ -466,7 +564,7 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
                         <div className="font-bold text-amber-200 text-xs sm:text-sm">{item.buyoutPrice.toLocaleString()} G</div>
                         <button
                           onClick={() => handleBid(item, item.buyoutPrice)}
-                          className="pixel-btn text-[10px] w-full mt-1 !py-1 !bg-amber-600 font-bold"
+                          className="pixel-btn text-[10px] w-full mt-1 !py-1 !bg-amber-600 hover:!bg-amber-500 font-bold"
                         >
                           即決購入
                         </button>
@@ -475,7 +573,7 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
                   </div>
                 );
               })}
-              {items.filter(i => i.status === 'active' && i.sellerId !== auth.currentUser?.uid).length === 0 && (
+              {filteredBuyItems.length === 0 && (
                 <div className="col-span-1 sm:col-span-2 text-center py-10 text-slate-400 text-xs">
                   現在出品されているアイテムはありません
                 </div>
@@ -500,7 +598,7 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
                       className="bg-slate-950 border border-slate-700 p-3 flex justify-between items-center gap-3 rounded"
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <ItemIcon item={compiled} />
+                        <ItemIcon item={compiled} size={36} />
                         <div className="min-w-0 flex-1">
                           <div className="font-bold text-xs sm:text-sm text-slate-100 truncate">
                             {compiled.name}

@@ -7,10 +7,11 @@ import { generateDailyShopItems, getTodayDateString, DailyShopItem } from '../da
 import { getShopDiscountMultiplier } from '../jobUtils';
 
 interface ItemIconProps {
-  item: GameItem;
+  item: GameItem & { baseId?: string };
+  size?: number;
 }
 
-export const ItemIcon: React.FC<ItemIconProps> = ({ item }) => {
+export const ItemIcon: React.FC<ItemIconProps> = ({ item, size = 32 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -21,16 +22,52 @@ export const ItemIcon: React.FC<ItemIconProps> = ({ item }) => {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Draw generic square for materials for now, or you could add specific material sprites later
-    if (item.type === 'material') {
-      ctx.fillStyle = item.color;
+    // Draw generic square for materials or gems
+    if (item.type === 'material' || item.type === 'gem') {
+      ctx.fillStyle = item.color || '#94a3b8';
       ctx.fillRect(8, 8, 16, 16);
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = '#ffffff';
       ctx.fillRect(10, 10, 4, 4);
       return;
     }
 
-    const spriteData = item.type === 'weapon' ? WEAPON_SPRITES[item.id] || WEAPON_SPRITES['w_wood_sword'] : ARMOR_SPRITES[item.id] || ARMOR_SPRITES['a_cloth'];
+    // Draw chest icon
+    if (item.type === 'chest') {
+      const isGold = item.name?.includes('金') || item.color === '#f59e0b';
+      const isSilver = item.name?.includes('銀') || item.color === '#94a3b8';
+      const isLegend = item.name?.includes('伝説') || item.color === '#a855f7';
+      
+      const bodyColor = isLegend ? '#581c87' : isGold ? '#b45309' : isSilver ? '#475569' : '#78350f';
+      const lidColor = isLegend ? '#9333ea' : isGold ? '#f59e0b' : isSilver ? '#94a3b8' : '#b45309';
+      const lockColor = isLegend ? '#facc15' : isGold ? '#fde047' : '#e2e8f0';
+
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(6, 12, 20, 14);
+      ctx.fillStyle = lidColor;
+      ctx.fillRect(5, 7, 22, 6);
+      ctx.fillStyle = lockColor;
+      ctx.fillRect(14, 11, 4, 5);
+      return;
+    }
+
+    // Draw scroll / consumable icon
+    if (item.type === 'consumable') {
+      ctx.fillStyle = '#fef3c7';
+      ctx.fillRect(8, 6, 16, 20);
+      ctx.fillStyle = '#d97706';
+      ctx.fillRect(10, 9, 12, 2);
+      ctx.fillRect(10, 13, 12, 2);
+      ctx.fillRect(10, 17, 12, 2);
+      ctx.fillStyle = '#b45309';
+      ctx.fillRect(6, 5, 20, 2);
+      ctx.fillRect(6, 25, 20, 2);
+      return;
+    }
+
+    const spriteKey = (item as any).baseId || item.id;
+    const spriteData = item.type === 'weapon' 
+      ? WEAPON_SPRITES[spriteKey] || WEAPON_SPRITES[item.id] || WEAPON_SPRITES['w_wood_sword'] 
+      : ARMOR_SPRITES[spriteKey] || ARMOR_SPRITES[item.id] || ARMOR_SPRITES['a_cloth'];
     
     if (spriteData) {
       if (item.type === 'weapon') {
@@ -45,7 +82,15 @@ export const ItemIcon: React.FC<ItemIconProps> = ({ item }) => {
     }
   }, [item]);
 
-  return <canvas ref={canvasRef} width={32} height={32} className="w-8 h-8 rounded-sm pixel-panel p-0 bg-slate-800" style={{ imageRendering: 'pixelated' }} />;
+  return (
+    <canvas 
+      ref={canvasRef} 
+      width={32} 
+      height={32} 
+      style={{ width: size, height: size, imageRendering: 'pixelated' }} 
+      className="rounded-sm pixel-panel p-0 bg-slate-800 flex-shrink-0" 
+    />
+  );
 };
 
 interface InventoryProps {
@@ -1168,13 +1213,20 @@ export const Inventory: React.FC<InventoryProps> = ({
                 <label className="block text-[10px] text-purple-300 mb-1">抽出元（消滅します）:</label>
                 <select 
                   value={transferSourceUid}
-                  onChange={(e) => setTransferSourceUid(e.target.value)}
+                  onChange={(e) => {
+                    setTransferSourceUid(e.target.value);
+                    setTransferTargetUid('');
+                  }}
                   className="pixel-input text-xs w-full p-2 bg-slate-950 border border-slate-700 text-slate-200"
                 >
-                  <option value="">選択してください...</option>
-                  {ownedItems.filter(i => !inventory.find(inv => inv.uid === i.id)?.isLocked).map(item => (
-                    <option key={item.id} value={item.id}>{item.name}</option>
-                  ))}
+                  <option value="">抽出元の装備を選択...</option>
+                  {ownedItems
+                    .filter(i => (i.type === 'weapon' || i.type === 'armor') && !inventory.find(inv => inv.uid === i.id)?.isLocked)
+                    .map(item => (
+                      <option key={item.id} value={item.id}>
+                        {item.type === 'weapon' ? '⚔️' : '🛡️'} {item.name}
+                      </option>
+                    ))}
                 </select>
               </div>
 
@@ -1183,12 +1235,21 @@ export const Inventory: React.FC<InventoryProps> = ({
                 <select 
                   value={transferTargetUid}
                   onChange={(e) => setTransferTargetUid(e.target.value)}
-                  className="pixel-input text-xs w-full p-2 bg-slate-950 border border-slate-700 text-slate-200"
+                  disabled={!transferSourceUid}
+                  className="pixel-input text-xs w-full p-2 bg-slate-950 border border-slate-700 text-slate-200 disabled:opacity-50"
                 >
-                  <option value="">選択してください...</option>
-                  {ownedItems.filter(i => !inventory.find(inv => inv.uid === i.id)?.isLocked && i.id !== transferSourceUid).map(item => (
-                    <option key={item.id} value={item.id}>{item.name}</option>
-                  ))}
+                  <option value="">継承先の装備を選択...</option>
+                  {(() => {
+                    const sourceItem = ownedItems.find(i => i.id === transferSourceUid);
+                    if (!sourceItem) return null;
+                    return ownedItems
+                      .filter(i => i.type === sourceItem.type && i.id !== transferSourceUid && !inventory.find(inv => inv.uid === i.id)?.isLocked)
+                      .map(item => (
+                        <option key={item.id} value={item.id}>
+                          {item.type === 'weapon' ? '⚔️' : '🛡️'} {item.name}
+                        </option>
+                      ));
+                  })()}
                 </select>
               </div>
             </div>

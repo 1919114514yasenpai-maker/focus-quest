@@ -5,6 +5,7 @@ import { generateUid } from '../gameData';
 import { ItemIcon } from './Inventory';
 import { ITEMS } from '../gameData';
 import { PlayerItem } from '../types';
+import { getCompiledItem } from '../itemUtils';
 
 interface Guild {
   id: string;
@@ -582,35 +583,60 @@ export const GuildRanking: React.FC<GuildRankingProps> = ({ onClose, inventory, 
             <h3 className="text-sm font-bold text-indigo-300 mb-2">🛡️ 刻印するアイテムを選択</h3>
             <p className="text-[10px] text-slate-400 mb-4">現在所持している装備にギルド名を刻印できます。</p>
             <div className="flex-1 overflow-y-auto space-y-2 mb-4">
-              {inventory.length === 0 && <div className="text-center text-slate-500 text-xs py-4">アイテムを持っていません</div>}
-              {inventory.map(item => {
-                const myRankIndex = guilds.findIndex(g => g.id === myGuild.id);
-                const rankText = myRankIndex !== -1 ? ` (${myRankIndex + 1}位)` : '';
-                const engraveText = `${myGuild.name}${rankText}`;
-                const isAlreadyEngraved = item.engraving === engraveText;
-                
-                return (
-                  <div key={item.uid} className="bg-slate-950 border border-slate-700 p-2 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <ItemIcon item={item} />
-                      <div>
-                        <div className="font-bold text-xs text-slate-200">{ITEMS[item.itemId].name} {item.plus > 0 ? `+${item.plus}` : ''}</div>
-                        {item.engraving && <div className="text-[9px] text-indigo-400">現在の刻印: {item.engraving}</div>}
+              {inventory.filter(i => {
+                const b = ITEMS[i.baseId];
+                return b && (b.type === 'weapon' || b.type === 'armor');
+              }).length === 0 && (
+                <div className="text-center text-slate-500 text-xs py-4">刻印可能な装備（武器・防具）を持っていません</div>
+              )}
+              {inventory
+                .filter(i => {
+                  const b = ITEMS[i.baseId];
+                  return b && (b.type === 'weapon' || b.type === 'armor');
+                })
+                .map(item => {
+                  const myRankIndex = guilds.findIndex(g => g.id === myGuild.id);
+                  const rankText = myRankIndex !== -1 ? ` (${myRankIndex + 1}位)` : '';
+                  const engraveText = `${myGuild.name}${rankText}`;
+                  const isAlreadyEngraved = item.engraving === engraveText;
+                  const compiled = getCompiledItem(item) || {
+                    ...ITEMS[item.baseId],
+                    id: item.baseId,
+                    name: ITEMS[item.baseId]?.name || '装備',
+                    power: 0,
+                    price: 0,
+                    color: '#94a3b8',
+                    type: 'weapon' as const,
+                  };
+
+                  return (
+                    <div key={item.uid} className="bg-slate-950 border border-slate-700 p-2 flex items-center justify-between gap-2 rounded">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <ItemIcon item={{ ...compiled, id: item.baseId }} />
+                        <div className="min-w-0">
+                          <div className="font-bold text-xs text-slate-200 truncate">{compiled.name}</div>
+                          {item.engraving ? (
+                            <div className="text-[9px] text-indigo-400 truncate">現在の刻印: {item.engraving}</div>
+                          ) : (
+                            <div className="text-[9px] text-slate-500">未刻印</div>
+                          )}
+                        </div>
                       </div>
+                      <button
+                        onClick={() => {
+                          onEngrave(item.uid, engraveText);
+                          setShowEngraveModal(false);
+                        }}
+                        disabled={isAlreadyEngraved}
+                        className={`pixel-btn text-[10px] !py-1 !px-2.5 flex-shrink-0 ${
+                          isAlreadyEngraved ? 'opacity-50 !bg-slate-800' : '!bg-indigo-700 hover:!bg-indigo-600'
+                        }`}
+                      >
+                        {isAlreadyEngraved ? '刻印済' : '刻印する'}
+                      </button>
                     </div>
-                    <button 
-                      onClick={() => {
-                        onEngrave(item.uid, engraveText);
-                        setShowEngraveModal(false);
-                      }}
-                      disabled={isAlreadyEngraved}
-                      className="pixel-btn text-[10px] !py-1 !px-2 !bg-indigo-800 disabled:opacity-50"
-                    >
-                      {isAlreadyEngraved ? '刻印済' : '刻印する'}
-                    </button>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
             <button onClick={() => setShowEngraveModal(false)} className="pixel-btn !bg-slate-800">閉じる</button>
           </div>
