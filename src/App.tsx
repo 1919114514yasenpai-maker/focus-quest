@@ -402,16 +402,16 @@ export default function App() {
     }
   };
 
-  const handleAttackMonster = (damage: number, isCrit: boolean, lifestealHeal: number) => {
+  const handleAttackMonster = React.useCallback((damage: number, isCrit: boolean, lifestealHeal: number) => {
     if (lifestealHeal > 0) {
       setStats(prev => ({
         ...prev,
         hp: Math.min(prev.maxHp, prev.hp + lifestealHeal),
       }));
     }
-  };
+  }, []);
 
-  const handleMonsterDefeated = (defeatedMonster: Monster) => {
+  const handleMonsterDefeated = React.useCallback((defeatedMonster: Monster) => {
     addXpAndGold(defeatedMonster.xpReward, defeatedMonster.goldReward);
     
     // Process drops
@@ -425,12 +425,7 @@ export default function App() {
             limitBreak: 0,
             addedPower: 0,
           };
-          setInventory(prev => {
-            // Check if material already exists to stack them? Currently items don't stack but materials should be stackable or just added as separate items.
-            // Let's add them as separate items for now, or maybe stack? The inventory UI might need to group materials.
-            return [...prev, newItem];
-          });
-          // Show a toast or small alert? Maybe too annoying. Let's just silently add.
+          setInventory(prev => [...prev, newItem]);
         }
       });
     }
@@ -445,9 +440,9 @@ export default function App() {
         maxStageReached: nextMaxStage,
       };
     });
-  };
+  }, []);
 
-  const handlePlayerTakeDamage = (damage: number) => {
+  const handlePlayerTakeDamage = React.useCallback((damage: number) => {
     setStats(prev => {
       const nextHp = prev.hp - damage;
       if (nextHp <= 0) {
@@ -462,7 +457,7 @@ export default function App() {
       }
       return { ...prev, hp: nextHp };
     });
-  };
+  }, []);
 
   const handleBuyItem = (baseId: string, price: number) => {
     if (stats.gold < price) return;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { EquipmentState, GameItem, PlayerItem, ItemEffect, JobType } from '../types';
 import { ITEMS } from '../gameData';
 import { WEAPON_SPRITES, ARMOR_SPRITES, drawIconSprite } from '../sprites';
@@ -11,13 +11,23 @@ interface ItemIconProps {
   size?: number;
 }
 
-export const ItemIcon: React.FC<ItemIconProps> = ({ item, size = 32 }) => {
+const iconCache = new Map<string, string>();
+
+const getIconCacheKey = (item: GameItem & { baseId?: string }): string => {
+  return `${item.type}_${item.baseId || item.id}_${item.color || ''}_${item.name || ''}`;
+};
+
+export const ItemIcon: React.FC<ItemIconProps> = React.memo(({ item, size = 32 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const cacheKey = getIconCacheKey(item);
+  const cachedUrl = iconCache.get(cacheKey);
 
   useEffect(() => {
+    if (cachedUrl) return;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -28,6 +38,7 @@ export const ItemIcon: React.FC<ItemIconProps> = ({ item, size = 32 }) => {
       ctx.fillRect(8, 8, 16, 16);
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(10, 10, 4, 4);
+      iconCache.set(cacheKey, canvas.toDataURL());
       return;
     }
 
@@ -47,6 +58,7 @@ export const ItemIcon: React.FC<ItemIconProps> = ({ item, size = 32 }) => {
       ctx.fillRect(5, 7, 22, 6);
       ctx.fillStyle = lockColor;
       ctx.fillRect(14, 11, 4, 5);
+      iconCache.set(cacheKey, canvas.toDataURL());
       return;
     }
 
@@ -61,6 +73,7 @@ export const ItemIcon: React.FC<ItemIconProps> = ({ item, size = 32 }) => {
       ctx.fillStyle = '#b45309';
       ctx.fillRect(6, 5, 20, 2);
       ctx.fillRect(6, 25, 20, 2);
+      iconCache.set(cacheKey, canvas.toDataURL());
       return;
     }
 
@@ -80,7 +93,20 @@ export const ItemIcon: React.FC<ItemIconProps> = ({ item, size = 32 }) => {
         drawIconSprite(ctx, spriteData, 0, 0, 2);
       }
     }
-  }, [item]);
+    iconCache.set(cacheKey, canvas.toDataURL());
+  }, [cacheKey, cachedUrl, item]);
+
+  if (cachedUrl) {
+    return (
+      <img
+        src={cachedUrl}
+        alt={item.name}
+        style={{ width: size, height: size, imageRendering: 'pixelated' }}
+        className="rounded-sm pixel-panel p-0 bg-slate-800 flex-shrink-0"
+        loading="lazy"
+      />
+    );
+  }
 
   return (
     <canvas 
@@ -91,7 +117,7 @@ export const ItemIcon: React.FC<ItemIconProps> = ({ item, size = 32 }) => {
       className="rounded-sm pixel-panel p-0 bg-slate-800 flex-shrink-0" 
     />
   );
-};
+});
 
 interface InventoryProps {
   inventory: PlayerItem[];
@@ -156,27 +182,40 @@ export const Inventory: React.FC<InventoryProps> = ({
   const [transferTargetUid, setTransferTargetUid] = useState<string>('');
   
   const todayStr = getTodayDateString();
-  const dailyItems = generateDailyShopItems(todayStr);
+  const dailyItems = useMemo(() => generateDailyShopItems(todayStr), [todayStr]);
 
-  const ownedItems = inventory.map(pItem => getCompiledItem(pItem)).filter(Boolean) as GameItem[];
-  const weapons = ownedItems.filter(item => item.type === 'weapon');
-  const armors = ownedItems.filter(item => item.type === 'armor');
-  const materials = inventory.filter(i => ITEMS[i.baseId]?.type === 'material');
-  const chests = inventory.filter(i => ITEMS[i.baseId]?.type === 'chest');
-  const nonEquipItems = inventory.filter(i => {
-    const type = ITEMS[i.baseId]?.type;
-    return type === 'material' || type === 'chest' || type === 'gem' || type === 'consumable';
-  });
+  const { ownedItems, weapons, armors, materials, chests, nonEquipItems } = useMemo(() => {
+    const owned = inventory.map(pItem => getCompiledItem(pItem)).filter(Boolean) as GameItem[];
+    const weps = owned.filter(item => item.type === 'weapon');
+    const arms = owned.filter(item => item.type === 'armor');
+    const mats = inventory.filter(i => ITEMS[i.baseId]?.type === 'material');
+    const chs = inventory.filter(i => ITEMS[i.baseId]?.type === 'chest');
+    const nonEq = inventory.filter(i => {
+      const type = ITEMS[i.baseId]?.type;
+      return type === 'material' || type === 'chest' || type === 'gem' || type === 'consumable';
+    });
+
+    return {
+      ownedItems: owned,
+      weapons: weps,
+      armors: arms,
+      materials: mats,
+      chests: chs,
+      nonEquipItems: nonEq,
+    };
+  }, [inventory]);
 
   // ショップにはベースアイテムが並ぶ (素材・宝箱・呪い装備は除外)
-  const shopItems = Object.values(ITEMS).filter(item => 
-    item.type === 'weapon' || item.type === 'armor' || item.id === 'c_transfer_scroll'
-  ).filter(item => 
-    item.price > 0 && 
-    !item.isCursed && 
-    !item.effect?.isCursed &&
-    !item.id.includes('craft_')
-  );
+  const shopItems = useMemo(() => {
+    return Object.values(ITEMS).filter(item => 
+      item.type === 'weapon' || item.type === 'armor' || item.id === 'c_transfer_scroll'
+    ).filter(item => 
+      item.price > 0 && 
+      !item.isCursed && 
+      !item.effect?.isCursed &&
+      !item.id.includes('craft_')
+    );
+  }, []);
 
   // Initialize selected material if none is selected
   useEffect(() => {
