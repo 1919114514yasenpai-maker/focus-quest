@@ -17,7 +17,6 @@ service cloud.firestore {
     function existing() { return resource.data; }
 
     match /users/{userId} {
-      // Public profiles for rankings (No PII here)
       allow read: if isSignedIn();
       allow create: if isOwner(userId) && 
                        incoming().keys().hasAll(['displayName', 'weeklyFocusTime', 'weekId', 'totalFocusTime']) &&
@@ -30,22 +29,25 @@ service cloud.firestore {
     }
 
     match /guilds/{guildId} {
-      // Public guilds for rankings
       allow read: if isSignedIn();
       allow create: if isSignedIn() && 
                        incoming().leaderId == request.auth.uid &&
-                       incoming().keys().hasAll(['name', 'leaderId', 'weeklyFocusTime', 'weekId', 'memberCount', 'createdAt']) &&
+                       incoming().keys().hasAll(['name', 'leaderId', 'weeklyFocusTime', 'weekId', 'memberCount', 'createdAt', 'isPrivate', 'inviteCode']) &&
                        incoming().name is string && incoming().name.size() <= 50;
-      // Anyone can update to increment focus time or join/leave
-      allow update: if isSignedIn(); 
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn(); // Let client delete if empty
+
+      match /votes/{voterId} {
+        allow read: if isSignedIn();
+        allow write: if isOwner(voterId);
+      }
     }
 
     match /market/{itemId} {
-      // Public market
       allow read: if isSignedIn();
       allow create: if isSignedIn() && 
                        incoming().sellerId == request.auth.uid &&
-                       incoming().keys().hasAll(['sellerId', 'sellerName', 'itemData', 'currentBid', 'expiresAt', 'status', 'createdAt']);
+                       incoming().keys().hasAll(['sellerId', 'sellerName', 'itemData', 'startingBid', 'currentBid', 'expiresAt', 'status', 'createdAt']);
       allow update: if isSignedIn(); 
     }
   }

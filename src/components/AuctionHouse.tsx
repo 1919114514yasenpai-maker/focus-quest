@@ -11,12 +11,13 @@ interface MarketItem {
   sellerId: string;
   sellerName: string;
   itemData: PlayerItem;
+  startingBid: number;
   currentBid: number;
   buyoutPrice: number;
   highestBidderId: string | null;
   highestBidderName: string | null;
   expiresAt: number;
-  status: 'active' | 'sold' | 'expired' | 'claimed';
+  status: 'active' | 'sold' | 'expired' | 'claimed' | 'canceled';
   createdAt: string;
 }
 
@@ -32,11 +33,13 @@ interface AuctionHouseProps {
 export const AuctionHouse: React.FC<AuctionHouseProps> = ({ onClose, inventory, gold, onRefreshGold, onReceiveItem, onRemoveItem }) => {
   const [items, setItems] = useState<MarketItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'buy' | 'sell' | 'mybids'>('buy');
+  const [tab, setTab] = useState<'buy' | 'sell' | 'my'>('buy');
   
   // Sell state
   const [selectedSellItem, setSelectedSellItem] = useState<PlayerItem | null>(null);
+  const [startingBid, setStartingBid] = useState<number>(100);
   const [buyoutPrice, setBuyoutPrice] = useState<number>(1000);
+  const [durationHours, setDurationHours] = useState<number>(24);
 
   const fetchItems = async () => {
     setLoading(true);
@@ -48,10 +51,13 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({ onClose, inventory, 
       const now = Date.now();
       const updated = fetched.map(item => {
         if (item.status === 'active' && item.expiresAt < now) {
-          return { ...item, status: item.highestBidderId ? 'sold' : 'expired' } as MarketItem;
+          const newStatus = item.highestBidderId ? 'sold' : 'expired';
+          updateDoc(doc(db, 'market', item.id), { status: newStatus });
+          return { ...item, status: newStatus };
         }
         return item;
       });
+      
       setItems(updated);
     } catch (e) {
       console.error(e);
@@ -65,77 +71,115 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({ onClose, inventory, 
 
   const handleSell = async () => {
     if (!auth.currentUser || !selectedSellItem) return;
-    if (buyoutPrice <= 0) return;
-
-    const marketId = generateUid();
-    const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-    const newItem: MarketItem = {
-      id: marketId,
-      sellerId: auth.currentUser.uid,
-      sellerName: auth.currentUser.displayName || '名無し勇者',
-      itemData: selectedSellItem,
-      currentBid: Math.floor(buyoutPrice * 0.1), // starting bid is 10%
-      buyoutPrice,
-      highestBidderId: null,
-      highestBidderName: null,
-      expiresAt,
-      status: 'active',
-      createdAt: new Date().toISOString()
-    };
+    if (startingBid < 10) { alert('最低価格は10G以上です'); return; }
+    if (buyoutPrice <= startingBid) { alert('即決価格は最低価格より高く設定してください'); return; }
 
     try {
+      const marketId = generateUid();
+      const expiresAt = Date.now() + (durationHours * 60 * 60 * 1000);
+      const newItem: MarketItem = {
+        id: marketId,
+        sellerId: auth.currentUser.uid,
+        sellerName: auth.currentUser.displayName || '名無し勇者',
+        itemData: selectedSellItem,
+        startingBid: startingBid,
+        currentBid: 0,
+        buyoutPrice,
+        highestBidderId: null,
+        highestBidderName: null,
+        expiresAt,
+        status: 'active',
+        createdAt: new Date().toISOString()
+      };
+
       await setDoc(doc(db, 'market', marketId), newItem);
       onRemoveItem(selectedSellItem.uid);
       setSelectedSellItem(null);
+      setTab('buy');
       fetchItems();
-      alert('出品しました！');
     } catch (e) {
       console.error(e);
       alert('出品に失敗しました');
     }
   };
 
-  const handleBuyout = async (marketItem: MarketItem) => {
-    if (!auth.currentUser) return;
-    if (gold < marketItem.buyoutPrice) {
-      alert('所持金が足りません！');
-      return;
-    }
+  const handleBid = async (item: MarketItem, bidAmount: number) => {
+    if (!auth.currentUser || gold < bidAmount) return;
     
     try {
-      await updateDoc(doc(db, 'market', marketItem.id), {
-        status: 'sold',
+      const docRef = doc(db, 'market', item.id);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const currentData = snap.data() as MarketItem;
+      
+      if (currentData.status !== 'active') {
+        alert('このオークションは終了しています');
+        fetchItems();
+        return;
+      }
+      
+      if (bidAmount <= currentData.currentBid || bidAmount < currentData.startingBid) {
+        alert('入札額が低すぎます');
+        fetchItems();
+        return;
+      }
+
+      onRefreshGold(-bidAmount);
+
+      const isBuyout = bidAmount >= currentData.buyoutPrice;
+      const newStatus = isBuyout ? 'sold' : 'active';
+      
+      await updateDoc(docRef, {
+        currentBid: isBuyout ? currentData.buyoutPrice : bidAmount,
         highestBidderId: auth.currentUser.uid,
-        highestBidderName: auth.currentUser.displayName || '名無し勇者',
-        currentBid: marketItem.buyoutPrice
+        highestBidderName: auth.currentUser.displayName,
+        status: newStatus
       });
-      onRefreshGold(-marketItem.buyoutPrice);
-      // Give item to player immediately for buyout
-      onReceiveItem({ ...marketItem.itemData, uid: generateUid() });
-      alert('落札しました！');
+      
       fetchItems();
     } catch (e) {
       console.error(e);
-      alert('購入に失敗しました');
+      alert('入札に失敗しました');
     }
   };
 
-  const handleClaim = async (marketItem: MarketItem) => {
+  const handleCancelListing = async (item: MarketItem) => {
+    if (item.sellerId !== auth.currentUser?.uid || item.status !== 'active') return;
+    if (item.currentBid > 0) {
+      alert('すでに入札があるため取り消せません');
+      return;
+    }
+    
+    if (confirm('出品を取り消しますか？アイテムはインベントリに戻ります。')) {
+      try {
+        await updateDoc(doc(db, 'market', item.id), { status: 'canceled' });
+        onReceiveItem(item.itemData);
+        fetchItems();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
+
+  const handleClaim = async (item: MarketItem) => {
     if (!auth.currentUser) return;
+    
     try {
-      await updateDoc(doc(db, 'market', marketItem.id), { status: 'claimed' });
-      if (marketItem.sellerId === auth.currentUser.uid && marketItem.highestBidderId) {
-        // Seller gets gold
-        onRefreshGold(marketItem.currentBid);
-        alert(`${marketItem.currentBid}G を受け取りました！`);
-      } else if (marketItem.highestBidderId === auth.currentUser.uid) {
-        // Bidder gets item
-        onReceiveItem({ ...marketItem.itemData, uid: generateUid() });
-        alert('落札アイテムを受け取りました！');
-      } else if (marketItem.sellerId === auth.currentUser.uid && !marketItem.highestBidderId) {
-        // Seller gets item back
-        onReceiveItem({ ...marketItem.itemData, uid: generateUid() });
-        alert('出品アイテムを回収しました！');
+      if (item.status === 'sold' && item.highestBidderId === auth.currentUser.uid) {
+        // I won
+        await updateDoc(doc(db, 'market', item.id), { status: 'claimed' });
+        onReceiveItem(item.itemData);
+      } else if (item.status === 'sold' && item.sellerId === auth.currentUser.uid) {
+        // My item sold
+        await updateDoc(doc(db, 'market', item.id), { status: 'claimed' });
+        onRefreshGold(item.currentBid);
+      } else if (item.status === 'expired' && item.sellerId === auth.currentUser.uid) {
+        // Expired without sale
+        await updateDoc(doc(db, 'market', item.id), { status: 'claimed' });
+        onReceiveItem(item.itemData);
+      } else if (item.status === 'canceled' && item.sellerId === auth.currentUser.uid) {
+         // Should already be in inventory, just hide
+         await updateDoc(doc(db, 'market', item.id), { status: 'claimed' });
       }
       fetchItems();
     } catch (e) {
@@ -143,145 +187,221 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({ onClose, inventory, 
     }
   };
 
+  const formatTimeLeft = (expiresAt: number) => {
+    const diff = expiresAt - Date.now();
+    if (diff <= 0) return '終了';
+    const h = Math.floor(diff / (1000 * 60 * 60));
+    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    return `${h}時間${m}分`;
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="pixel-panel max-w-3xl w-full bg-slate-900 border-2 border-emerald-500 p-5 relative text-slate-100 shadow-[0_0_25px_rgba(16,185,129,0.3)]">
+    <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
+      <div className="pixel-panel max-w-4xl w-full bg-slate-900 border-2 border-amber-600 p-3 sm:p-5 relative text-slate-100 shadow-[0_0_25px_rgba(217,119,6,0.3)] h-[90vh] flex flex-col">
         <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-2">
-          <h2 className="text-lg font-bold text-emerald-300 flex items-center gap-2">
+          <h2 className="text-base sm:text-lg font-bold text-amber-500 flex items-center gap-2">
             <span>⚖️</span> グローバルオークション
           </h2>
-          <div className="flex items-center gap-4">
-            <span className="text-amber-300 font-bold">所持金: {gold} G</span>
+          <div className="flex items-center gap-2 sm:gap-4">
+            <span className="text-amber-300 font-bold text-xs sm:text-sm">所持: {gold} G</span>
             <button onClick={onClose} className="pixel-btn text-xs !bg-slate-800 !py-1 !px-2">閉じる</button>
           </div>
         </div>
 
         <div className="flex gap-2 mb-4">
-          <button onClick={() => setTab('buy')} className={`pixel-btn text-xs flex-1 ${tab === 'buy' ? '!bg-emerald-700' : '!bg-slate-800'}`}>購入する</button>
-          <button onClick={() => setTab('sell')} className={`pixel-btn text-xs flex-1 ${tab === 'sell' ? '!bg-emerald-700' : '!bg-slate-800'}`}>出品する</button>
-          <button onClick={() => setTab('mybids')} className={`pixel-btn text-xs flex-1 ${tab === 'mybids' ? '!bg-emerald-700' : '!bg-slate-800'}`}>取引状況</button>
+          <button 
+            onClick={() => setTab('buy')} 
+            className={`pixel-btn flex-1 text-xs sm:text-sm py-2 ${tab === 'buy' ? '!bg-amber-700 !border-amber-500' : '!bg-slate-800 !text-slate-400'}`}
+          >
+            🛒 買う
+          </button>
+          <button 
+            onClick={() => setTab('sell')} 
+            className={`pixel-btn flex-1 text-xs sm:text-sm py-2 ${tab === 'sell' ? '!bg-amber-700 !border-amber-500' : '!bg-slate-800 !text-slate-400'}`}
+          >
+            💰 売る
+          </button>
+          <button 
+            onClick={() => setTab('my')} 
+            className={`pixel-btn flex-1 text-xs sm:text-sm py-2 ${tab === 'my' ? '!bg-amber-700 !border-amber-500' : '!bg-slate-800 !text-slate-400'}`}
+          >
+            👤 取引状況
+          </button>
         </div>
 
-        {loading ? (
-          <div className="text-center py-10 text-emerald-400 animate-pulse">読み込み中...</div>
-        ) : (
-          <div className="h-[50vh] overflow-y-auto pr-2">
-            {tab === 'buy' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {items.filter(i => i.status === 'active' && i.sellerId !== auth.currentUser?.uid).map(item => {
-                  const baseDef = ITEMS[item.itemData.baseId];
-                  return (
-                    <div key={item.id} className="bg-slate-950 border border-slate-700 p-3 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center gap-2 mb-2">
-                          <ItemIcon item={{ ...baseDef, id: item.itemData.baseId } as GameItem} />
-                          <div className="font-bold text-sm text-slate-200">
-                            {baseDef?.name} {item.itemData.upgradeLevel > 0 ? `+${item.itemData.upgradeLevel}` : ''}
-                          </div>
-                        </div>
-                        <div className="text-[10px] text-slate-400">出品者: {item.sellerName}</div>
-                        <div className="text-[10px] text-amber-300">即決価格: {item.buyoutPrice} G</div>
+        <div className="flex-1 overflow-y-auto pr-2">
+          {loading ? (
+            <div className="text-center py-10 text-amber-500 animate-pulse">読み込み中...</div>
+          ) : tab === 'sell' ? (
+            <div className="space-y-4">
+              <div className="bg-slate-950 p-4 border border-slate-700">
+                <h3 className="text-sm font-bold text-amber-400 mb-3">出品するアイテムを選ぶ</h3>
+                <div className="flex flex-wrap gap-2">
+                  {inventory.filter(i => !i.isLocked).map(item => (
+                    <div 
+                      key={item.uid}
+                      onClick={() => setSelectedSellItem(item)}
+                      className={`relative cursor-pointer p-1 border-2 ${selectedSellItem?.uid === item.uid ? 'border-amber-500 bg-amber-900/30' : 'border-slate-700 bg-slate-900 hover:border-slate-500'}`}
+                    >
+                      <ItemIcon item={item} />
+                      {item.plus > 0 && <span className="absolute -top-1 -right-1 text-[10px] text-amber-400 font-bold">+{item.plus}</span>}
+                    </div>
+                  ))}
+                  {inventory.filter(i => !i.isLocked).length === 0 && (
+                    <div className="text-xs text-slate-500">出品可能なアイテムがありません（ロック中のアイテムは出品できません）</div>
+                  )}
+                </div>
+              </div>
+
+              {selectedSellItem && (
+                <div className="bg-slate-950 p-4 border border-amber-800 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <ItemIcon item={selectedSellItem} />
+                    <div>
+                      <div className="font-bold text-sm text-slate-200">{ITEMS[selectedSellItem.itemId].name} {selectedSellItem.plus > 0 ? `+${selectedSellItem.plus}` : ''}</div>
+                      <div className="text-xs text-slate-400">推奨相場: {ITEMS[selectedSellItem.itemId].price * 2}G ~</div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">最低価格 (入札開始額)</label>
+                      <input 
+                        type="number" 
+                        value={startingBid}
+                        onChange={(e) => setStartingBid(Math.max(10, parseInt(e.target.value) || 0))}
+                        className="pixel-input w-full p-2 bg-slate-900 border border-slate-700 text-amber-300 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">即決価格 (バイアウト)</label>
+                      <input 
+                        type="number" 
+                        value={buyoutPrice}
+                        onChange={(e) => setBuyoutPrice(Math.max(10, parseInt(e.target.value) || 0))}
+                        className="pixel-input w-full p-2 bg-slate-900 border border-slate-700 text-amber-300 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">出品期間</label>
+                      <select 
+                        value={durationHours}
+                        onChange={(e) => setDurationHours(parseInt(e.target.value))}
+                        className="pixel-input w-full p-2 bg-slate-900 border border-slate-700 text-slate-200"
+                      >
+                        <option value={6}>6時間</option>
+                        <option value={12}>12時間</option>
+                        <option value={24}>24時間</option>
+                        <option value={48}>48時間</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button onClick={handleSell} className="pixel-btn active w-full py-3">
+                    出品する
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : tab === 'buy' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {items.filter(i => i.status === 'active' && i.sellerId !== auth.currentUser?.uid).map(item => (
+                <div key={item.id} className="bg-slate-950 border border-slate-700 p-3 flex flex-col gap-2">
+                  <div className="flex items-start gap-3">
+                    <ItemIcon item={item.itemData} />
+                    <div className="flex-1">
+                      <div className="font-bold text-xs sm:text-sm text-slate-200 truncate">
+                        {ITEMS[item.itemData.itemId].name} {item.itemData.plus > 0 ? `+${item.itemData.plus}` : ''}
                       </div>
+                      <div className="text-[10px] text-slate-500">出品: {item.sellerName}</div>
+                      {item.itemData.engraving && (
+                        <div className="text-[10px] text-indigo-300 mt-0.5">🛡️ 刻印: {item.itemData.engraving}</div>
+                      )}
+                      <div className="text-[10px] text-rose-400 mt-0.5">残り: {formatTimeLeft(item.expiresAt)}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-auto pt-2 border-t border-slate-800">
+                    <div>
+                      <div className="text-[10px] text-slate-400">現在価格 (最低: {item.startingBid})</div>
+                      <div className="font-bold text-amber-400 text-xs sm:text-sm">{Math.max(item.currentBid, item.startingBid)} G</div>
                       <button 
-                        onClick={() => handleBuyout(item)}
-                        className="pixel-btn mt-2 text-xs !bg-amber-600 !py-1"
+                        onClick={() => handleBid(item, Math.max(item.currentBid + 10, item.startingBid))}
+                        className="pixel-btn text-[10px] w-full mt-1 !py-1"
+                      >
+                        入札
+                      </button>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-400">即決価格</div>
+                      <div className="font-bold text-amber-200 text-xs sm:text-sm">{item.buyoutPrice} G</div>
+                      <button 
+                        onClick={() => handleBid(item, item.buyoutPrice)}
+                        className="pixel-btn text-[10px] w-full mt-1 !py-1 !bg-amber-600"
                       >
                         即決購入
                       </button>
                     </div>
-                  );
-                })}
-                {items.filter(i => i.status === 'active' && i.sellerId !== auth.currentUser?.uid).length === 0 && (
-                  <div className="col-span-2 text-center text-slate-500 py-10">出品がありません</div>
-                )}
-              </div>
-            )}
-
-            {tab === 'sell' && (
-              <div className="space-y-4">
-                <div className="bg-slate-950 p-4 border border-slate-700">
-                  <h3 className="text-sm font-bold text-slate-300 mb-2">出品するアイテムを選ぶ</h3>
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {inventory.filter(i => !i.isLocked).map(item => {
-                      const baseDef = ITEMS[item.baseId];
-                      return (
-                        <button
-                          key={item.uid}
-                          onClick={() => setSelectedSellItem(item)}
-                          className={`pixel-btn text-[10px] !py-1 !px-2 flex items-center gap-1 ${selectedSellItem?.uid === item.uid ? '!border-emerald-400' : '!border-slate-600 !bg-slate-800'}`}
-                        >
-                          <ItemIcon item={{ ...baseDef, id: item.baseId } as GameItem} />
-                          {baseDef?.name} {item.upgradeLevel > 0 ? `+${item.upgradeLevel}` : ''}
-                        </button>
-                      );
-                    })}
                   </div>
-                  
-                  {selectedSellItem && (
-                    <div className="flex items-end gap-3">
-                      <div className="flex-1">
-                        <label className="text-[10px] text-slate-400 block mb-1">即決価格 (G)</label>
-                        <input 
-                          type="number" 
-                          min={1} 
-                          value={buyoutPrice} 
-                          onChange={e => setBuyoutPrice(parseInt(e.target.value) || 0)}
-                          className="pixel-input w-full p-2 bg-slate-900 border border-slate-600 text-slate-200 text-sm"
-                        />
-                      </div>
-                      <button 
-                        onClick={handleSell}
-                        className="pixel-btn text-xs !bg-emerald-600 h-[38px] px-4"
-                      >
-                        出品
-                      </button>
-                    </div>
-                  )}
                 </div>
-              </div>
-            )}
-
-            {tab === 'mybids' && (
-              <div className="space-y-2">
-                {items.filter(i => i.sellerId === auth.currentUser?.uid || i.highestBidderId === auth.currentUser?.uid).map(item => {
-                  const baseDef = ITEMS[item.itemData.baseId];
-                  const isSeller = item.sellerId === auth.currentUser?.uid;
-                  
-                  let statusText = '';
-                  if (item.status === 'active') statusText = '出品中 (残り時間あり)';
-                  if (item.status === 'sold') statusText = '落札済み！';
-                  if (item.status === 'expired') statusText = '期限切れ (未落札)';
-                  if (item.status === 'claimed') statusText = '受取完了';
-
-                  return (
-                    <div key={item.id} className="bg-slate-950 p-3 border border-slate-700 flex items-center justify-between">
+              ))}
+              {items.filter(i => i.status === 'active' && i.sellerId !== auth.currentUser?.uid).length === 0 && (
+                <div className="col-span-1 sm:col-span-2 text-center py-10 text-slate-500 text-xs">
+                  現在出品されているアイテムはありません
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {items.filter(i => (i.sellerId === auth.currentUser?.uid || i.highestBidderId === auth.currentUser?.uid) && i.status !== 'claimed').map(item => {
+                const isSeller = item.sellerId === auth.currentUser?.uid;
+                const isWinner = item.highestBidderId === auth.currentUser?.uid && item.status === 'sold';
+                
+                return (
+                  <div key={item.id} className="bg-slate-950 border border-slate-700 p-3 flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <ItemIcon item={item.itemData} />
                       <div>
-                        <div className="font-bold text-sm text-slate-200">
-                          {isSeller ? '📤 出品' : '📥 入札'}: {baseDef?.name} {item.itemData.upgradeLevel > 0 ? `+${item.itemData.upgradeLevel}` : ''}
+                        <div className="font-bold text-xs sm:text-sm text-slate-200">
+                          {ITEMS[item.itemData.itemId].name} {item.itemData.plus > 0 ? `+${item.itemData.plus}` : ''}
                         </div>
-                        <div className="text-[10px] text-slate-400 mt-1">
-                          状態: <span className={item.status === 'sold' ? 'text-emerald-400' : 'text-slate-300'}>{statusText}</span>
+                        <div className="text-[10px] text-slate-400">
+                          {isSeller ? 'あなたの出品' : 'あなたの入札'} / 現在: {item.currentBid || item.startingBid}G
+                        </div>
+                        <div className="text-[10px] font-bold mt-1">
+                          {item.status === 'active' && <span className="text-sky-400">出品中 ({formatTimeLeft(item.expiresAt)})</span>}
+                          {item.status === 'sold' && <span className="text-emerald-400">落札完了！</span>}
+                          {item.status === 'expired' && <span className="text-rose-400">期限切れ</span>}
+                          {item.status === 'canceled' && <span className="text-slate-500">取り消し済み</span>}
                         </div>
                       </div>
-                      
-                      {item.status !== 'active' && item.status !== 'claimed' && isSeller && (
-                        <button onClick={() => handleClaim(item)} className="pixel-btn text-[10px] !bg-amber-600 !py-1 !px-3">
-                          {item.status === 'sold' ? '売上金を受け取る' : 'アイテムを回収'}
+                    </div>
+                    <div>
+                      {item.status === 'active' && isSeller && (
+                        <button 
+                          onClick={() => handleCancelListing(item)} 
+                          className="pixel-btn text-[10px] !py-1 !px-2 !bg-rose-900 !border-rose-700 hover:!bg-rose-800"
+                        >
+                          取り消す
                         </button>
                       )}
-                      
-                      {item.status === 'sold' && !isSeller && item.highestBidderId === auth.currentUser?.uid && (
-                        <button onClick={() => handleClaim(item)} className="pixel-btn text-[10px] !bg-amber-600 !py-1 !px-3">
-                          アイテムを受け取る
+                      {(item.status === 'sold' || item.status === 'expired' || item.status === 'canceled') && (isSeller || isWinner) && (
+                        <button 
+                          onClick={() => handleClaim(item)} 
+                          className="pixel-btn text-xs !py-2 !px-4 !bg-emerald-600 active"
+                        >
+                          {isSeller && item.status === 'sold' ? '売上受取' : 'アイテム回収'}
                         </button>
                       )}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
+                  </div>
+                );
+              })}
+              {items.filter(i => (i.sellerId === auth.currentUser?.uid || i.highestBidderId === auth.currentUser?.uid) && i.status !== 'claimed').length === 0 && (
+                <div className="text-center py-10 text-slate-500 text-xs">
+                  取引中のアイテムはありません
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

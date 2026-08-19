@@ -69,6 +69,8 @@ interface InventoryProps {
   onUseConsumable?: (uid: string) => void;
   onOpenSocket?: (uid: string) => void;
   onInsertGem?: (weaponUid: string, gemUid: string) => void;
+  guildName?: string;
+  onEngraveItem?: (uid: string, guildName: string) => void;
   onTransferEnhancements?: (sourceUid: string, targetUid: string, scrollUid: string) => void;
   isQuestActive?: boolean;
 }
@@ -96,6 +98,8 @@ export const Inventory: React.FC<InventoryProps> = ({
   onInsertGem,
   onTransferEnhancements,
   isQuestActive = false,
+  guildName,
+  onEngraveItem,
 }) => {
   const [tab, setTab] = useState<'inventory' | 'shop' | 'dailyShop' | 'forge' | 'materials'>('inventory');
   const [selectedMaterialUid, setSelectedMaterialUid] = useState<string>('');
@@ -648,6 +652,11 @@ export const Inventory: React.FC<InventoryProps> = ({
             <div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-base font-bold text-slate-100">{compiled.name}</span>
+                {detailPlayerItem.engraving && (
+                  <span className="text-[10px] bg-slate-800 text-indigo-300 border border-slate-600 px-1.5 py-0.5 rounded font-bold whitespace-nowrap">
+                    🛡️ {detailPlayerItem.engraving}
+                  </span>
+                )}
                 {compiled.isCursed && (
                   <span className="text-xs bg-purple-950 text-purple-300 px-1.5 py-0.5 rounded border border-purple-700 font-extrabold">
                     💀 呪い装備
@@ -886,7 +895,20 @@ export const Inventory: React.FC<InventoryProps> = ({
               </button>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
+              {guildName && !detailPlayerItem.engraving && onEngraveItem && (
+                <button 
+                  onClick={() => {
+                    if (confirm(`「${compiled.name}」にギルド名「${guildName}」を刻印しますか？`)) {
+                      onEngraveItem(detailPlayerItem.uid, guildName);
+                      setDetailPlayerItem(null);
+                    }
+                  }}
+                  className="pixel-btn text-xs flex-1 min-w-[40%] !bg-indigo-700 !border-indigo-500 hover:!bg-indigo-600"
+                >
+                  🛡️ ギルド刻印
+                </button>
+              )}
               <button
                 onClick={() => onToggleLock && onToggleLock(detailPlayerItem.uid)}
                 className="pixel-btn text-xs flex-1 !bg-slate-800 !border-slate-600"

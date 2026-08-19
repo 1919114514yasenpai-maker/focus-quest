@@ -47,6 +47,7 @@ export default function App() {
   const [showJobModal, setShowJobModal] = useState(false);
   const [showGuildRanking, setShowGuildRanking] = useState(false);
   const [showAuctionHouse, setShowAuctionHouse] = useState(false);
+  const [myGuildName, setMyGuildName] = useState<string | undefined>();
   const [isJobMilestoneTrigger, setIsJobMilestoneTrigger] = useState(false);
 
   const [pendingChestReward, setPendingChestReward] = useState<ChestReward | null>(null);
@@ -702,6 +703,11 @@ export default function App() {
     }
   };
 
+  const handleEngraveItem = (uid: string, guildName: string) => {
+    setInventory(prev => prev.map(item => item.uid === uid ? { ...item, engraving: guildName } : item));
+    showToast('✨ ギルド名を刻印しました！');
+  };
+
   const handleInsertGem = (weaponUid: string, gemUid: string) => {
     const weapon = inventory.find(i => i.uid === weaponUid);
     const gem = inventory.find(i => i.uid === gemUid);
@@ -895,36 +901,17 @@ export default function App() {
       </div>
 
       <div className="relative z-10 w-full p-2 sm:p-4 flex flex-wrap justify-between items-start pointer-events-none gap-2">
-        <div className="pixel-panel w-64 sm:w-72 pointer-events-auto bg-slate-900/90 border-slate-700 p-2 sm:p-3">
-          <div className="flex justify-between items-center mb-1 gap-1">
-            <div className="flex items-center gap-1">
+        <div className="pixel-panel w-full sm:w-72 max-w-full pointer-events-auto bg-slate-900/90 border-slate-700 p-2 sm:p-3">
+          <div className="flex justify-between items-center mb-1.5 gap-1">
+            <div className="flex items-center gap-1.5">
               <span className="text-xs sm:text-sm text-amber-300 font-bold">勇者 Lv.{stats.level}</span>
-              {(() => {
-                const unlocked = isJobUnlocked(stats.level);
-                const canChange = canChangeJobNow(stats.level, stats.lastJobChangeLevel);
-                return (
-                  <button
-                    onClick={() => {
-                      setIsJobMilestoneTrigger(canChange);
-                      setShowJobModal(true);
-                    }}
-                    className={`pixel-btn text-[9px] !py-0.5 !px-1.5 flex items-center gap-1 ${
-                      canChange
-                        ? '!bg-amber-600 !text-white !border-amber-400 animate-bounce'
-                        : '!bg-indigo-950 !text-indigo-300 !border-indigo-600 hover:!bg-indigo-900'
-                    }`}
-                    title={unlocked ? "特化職神殿" : "特化職 (Lv.100で解禁)"}
-                  >
-                    <span>{currentJobDef.icon} {currentJobDef.name}</span>
-                    {canChange && <span className="text-[8px] bg-amber-400 text-slate-950 font-bold px-1 rounded">転職可!</span>}
-                    {!unlocked && <span className="text-[8px] bg-slate-800 text-slate-400 px-1 rounded border border-slate-700">Lv.100解禁</span>}
-                  </button>
-                );
-              })()}
+              <span className="text-[10px] sm:text-xs text-indigo-300 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-700/60 font-medium">
+                {currentJobDef.icon} {currentJobDef.name}
+              </span>
             </div>
             <button
               onClick={() => setShowStageSelect(true)}
-              className="pixel-btn text-[10px] !py-0.5 !px-1.5 active !border-sky-400 !text-sky-300 hover:!bg-sky-950 flex items-center gap-1"
+              className="pixel-btn text-[10px] !py-0.5 !px-2 active !border-sky-400 !text-sky-300 hover:!bg-sky-950 flex items-center gap-1"
               title="一度到達した階層に移動"
             >
               <span>地下 {stats.stage} 階</span>
@@ -969,7 +956,7 @@ export default function App() {
           )}
         </div>
 
-        <div className="pixel-panel text-center pointer-events-auto min-w-[160px] sm:min-w-[180px] bg-slate-900/90 border-slate-700 flex flex-col items-center p-2 sm:p-3">
+        <div className="pixel-panel text-center pointer-events-auto min-w-[160px] sm:min-w-[180px] bg-slate-900/90 border-slate-700 flex flex-col items-center p-2 sm:p-3 mx-auto sm:mx-0">
           <div className="text-[11px] sm:text-xs text-slate-400 mb-0.5">
             {timerMode === 'idle' ? '待機中' : timerMode === 'focus' ? '⚔️ 集中クエスト中' : '☕ 休憩中'}
           </div>
@@ -1012,70 +999,104 @@ export default function App() {
         </div>
       </div>
 
-      <div className="mt-auto relative z-10 p-2 sm:p-4 pb-3 sm:pb-5 flex flex-wrap justify-center items-center gap-2 sm:gap-3 pointer-events-auto max-w-full">
-        {timerMode === 'idle' ? (
-          <button onClick={handleStartFocus} className="pixel-btn active text-xs sm:text-sm px-4 sm:px-6 py-2 sm:py-2.5">
-            ⚔️ 集中クエスト開始 ({focusMinutes}分)
-          </button>
-        ) : timerMode === 'focus' ? (
-          <button onClick={handleStop} className="pixel-btn !border-rose-600 !text-rose-300 hover:!bg-rose-950/60 text-xs sm:text-sm px-4 sm:px-6 py-2 sm:py-2.5">
-            🏃 撤退する
-          </button>
-        ) : (
-          <>
-            <button onClick={handleStartFocus} className="pixel-btn active text-xs sm:text-sm px-4 sm:px-6 py-2 sm:py-2.5">
-              ⚔️ 次の集中へ進む
-            </button>
-            <button onClick={handleStop} className="pixel-btn opacity-80 text-xs sm:text-sm px-4 sm:px-6 py-2 sm:py-2.5">
-              終了する
-            </button>
-          </>
-        )}
-
-        {(() => {
-          const unlocked = isJobUnlocked(stats.level);
-          const canChange = canChangeJobNow(stats.level, stats.lastJobChangeLevel);
-          return (
+      <div className="mt-auto relative z-10 p-2 sm:p-3 pb-3 flex flex-col items-center gap-2 pointer-events-auto w-full max-w-md mx-auto">
+        {/* Main Quest Action */}
+        <div className="w-full">
+          {timerMode === 'idle' ? (
             <button
-              onClick={() => {
-                setIsJobMilestoneTrigger(canChange);
-                setShowJobModal(true);
-              }}
-              className={`pixel-btn text-xs sm:text-sm px-3 sm:px-5 py-2 sm:py-2.5 flex items-center gap-1.5 ${
-                canChange
-                  ? '!bg-amber-600 !border-amber-400 !text-white hover:!bg-amber-500 animate-pulse'
-                  : '!bg-indigo-950/90 !border-indigo-500 !text-indigo-200 hover:!bg-indigo-900'
-              }`}
+              onClick={handleStartFocus}
+              className="pixel-btn active text-xs sm:text-sm w-full py-2.5 sm:py-3 shadow-lg flex items-center justify-center gap-2 font-bold"
             >
-              <span>🏛️ {currentJobDef.icon} 特化職</span>
-              {canChange && <span className="text-[10px] bg-amber-400 text-slate-950 font-bold px-1.5 py-0.2 rounded">転職可!</span>}
-              {!unlocked && <span className="text-[10px] bg-slate-900 text-slate-400 px-1 rounded border border-slate-700">Lv.100解禁</span>}
+              <span>⚔️</span> 集中クエスト開始 ({focusMinutes}分)
             </button>
-          );
-        })()}
-
-        <button onClick={() => setShowGuildRanking(true)} className="pixel-btn text-xs sm:text-sm px-2 sm:px-3 py-2 sm:py-2.5" title="ギルドランキング">
-          🛡️
-        </button>
-        <button onClick={() => setShowAuctionHouse(true)} className="pixel-btn text-xs sm:text-sm px-2 sm:px-3 py-2 sm:py-2.5" title="グローバルオークション">
-          ⚖️
-        </button>
-        <button onClick={() => setShowInventory(!showInventory)} className="pixel-btn text-xs sm:text-sm px-4 sm:px-6 py-2 sm:py-2.5">
-          🎒 装備と工房 {timerMode === 'focus' && '🔒'}
-        </button>
-
-        <button
-          onClick={() => setShowSettings(!showSettings)}
-          className="pixel-btn text-xs sm:text-sm px-3 py-2 sm:py-2.5 relative"
-          title="設定・クラウド同期"
-        >
-          ⚙️
-          {user && (
-            <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-sky-500 text-[8px] text-white shadow-sm border border-slate-900">
-              ☁
-            </span>
+          ) : timerMode === 'focus' ? (
+            <button
+              onClick={handleStop}
+              className="pixel-btn !border-rose-600 !text-rose-300 hover:!bg-rose-950/60 text-xs sm:text-sm w-full py-2.5 sm:py-3 font-bold"
+            >
+              🏃 撤退する
+            </button>
+          ) : (
+            <div className="flex gap-2 w-full">
+              <button
+                onClick={handleStartFocus}
+                className="pixel-btn active text-xs sm:text-sm flex-1 py-2.5 font-bold"
+              >
+                ⚔️ 次の集中へ進む
+              </button>
+              <button
+                onClick={handleStop}
+                className="pixel-btn opacity-80 text-xs sm:text-sm px-4 py-2.5"
+              >
+                終了する
+              </button>
+            </div>
           )}
-        </button>
+        </div>
+
+        {/* Feature Row 1: Inventory & Specialization */}
+        <div className="grid grid-cols-2 gap-2 w-full">
+          <button
+            onClick={() => setShowInventory(!showInventory)}
+            className="pixel-btn text-xs sm:text-sm py-2 sm:py-2.5 flex items-center justify-center gap-1.5"
+          >
+            <span>🎒</span> 装備と工房 {timerMode === 'focus' && '🔒'}
+          </button>
+
+          {(() => {
+            const unlocked = isJobUnlocked(stats.level);
+            const canChange = canChangeJobNow(stats.level, stats.lastJobChangeLevel);
+            return (
+              <button
+                onClick={() => {
+                  setIsJobMilestoneTrigger(canChange);
+                  setShowJobModal(true);
+                }}
+                className={`pixel-btn text-xs sm:text-sm py-2 sm:py-2.5 flex items-center justify-center gap-1.5 ${
+                  canChange
+                    ? '!bg-amber-600 !border-amber-400 !text-white hover:!bg-amber-500 animate-pulse'
+                    : '!bg-indigo-950/90 !border-indigo-500 !text-indigo-200 hover:!bg-indigo-900'
+                }`}
+              >
+                <span>🏛️ 特化職</span>
+                {canChange && <span className="text-[9px] bg-amber-400 text-slate-950 font-bold px-1 rounded">転職可!</span>}
+                {!unlocked && <span className="text-[9px] bg-slate-900 text-slate-400 px-1 rounded border border-slate-700">Lv.100解禁</span>}
+              </button>
+            );
+          })()}
+        </div>
+
+        {/* Feature Row 2: Guild, Auction & Settings */}
+        <div className="grid grid-cols-3 gap-2 w-full">
+          <button
+            onClick={() => setShowGuildRanking(true)}
+            className="pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 flex items-center justify-center gap-1"
+            title="ギルドランキング"
+          >
+            <span>🛡️</span> ギルド
+          </button>
+
+          <button
+            onClick={() => setShowAuctionHouse(true)}
+            className="pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 flex items-center justify-center gap-1"
+            title="グローバルオークション"
+          >
+            <span>⚖️</span> 取引所
+          </button>
+
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 relative flex items-center justify-center gap-1"
+            title="設定・クラウド同期"
+          >
+            <span>⚙️</span> 設定
+            {user && (
+              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-sky-500 text-[8px] text-white shadow-sm border border-slate-900">
+                ☁
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
       {showJobModal && (
@@ -1116,6 +1137,8 @@ export default function App() {
               onInsertGem={handleInsertGem}
               onTransferEnhancements={handleTransferEnhancements}
               isQuestActive={timerMode === 'focus'}
+              guildName={myGuildName}
+              onEngraveItem={handleEngraveItem}
             />
             <button onClick={() => setShowInventory(false)} className="pixel-btn w-full mt-4 py-2">
               とじる
@@ -1132,7 +1155,10 @@ export default function App() {
         />
       )}
 
-      {showGuildRanking && <GuildRanking onClose={() => setShowGuildRanking(false)} />}
+      {showGuildRanking && <GuildRanking onClose={() => setShowGuildRanking(false)} inventory={inventory} onEngrave={(uid, text) => {
+        setInventory(prev => prev.map(item => item.uid === uid ? { ...item, engraving: text } : item));
+        showToast('✨ ギルド名を刻印しました！');
+      }} />}
       {showAuctionHouse && <AuctionHouse onClose={() => setShowAuctionHouse(false)} inventory={inventory} gold={stats.gold} onRefreshGold={(amount) => setStats(s => ({ ...s, gold: Math.max(0, s.gold + amount) }))} onReceiveItem={(item) => setInventory(inv => [...inv, item])} onRemoveItem={(uid) => setInventory(inv => inv.filter(i => i.uid !== uid))} />}
       {showSettings && (
         <Settings 

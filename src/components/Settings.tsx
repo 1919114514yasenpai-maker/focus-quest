@@ -1,5 +1,8 @@
 import React, { useRef, useState } from 'react';
 import { User } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { generateUid } from '../gameData';
 import { SaveData } from '../types';
 import { sanitizeSaveData, parseSaveText } from '../saveManager';
 
@@ -40,6 +43,47 @@ export const Settings: React.FC<SettingsProps> = ({
   const [copied, setCopied] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingData, setPendingData] = useState<SaveData | null>(null);
+  const [isRegeneratingGuilds, setIsRegeneratingGuilds] = useState(false);
+  const [adminSuccessMsg, setAdminSuccessMsg] = useState<string | null>(null);
+
+  const isAdminAccount = user && (user.email?.toLowerCase().trim() === '1919114514yasenpai@gmail.com');
+
+  const handleRegenerateGuilds = async () => {
+    if (!user) return;
+    setIsRegeneratingGuilds(true);
+    setAdminSuccessMsg(null);
+    setErrorMessage(null);
+    try {
+      const currentWeekId = `2026-W${Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000))}`;
+      const starters = [
+        { name: '🛡️ 暁の集中騎士団', focus: 150 },
+        { name: '🧙‍♂️ ポモドーロ魔導院', focus: 90 },
+        { name: '⚔️ 冒険者ギルド「黎明」', focus: 45 }
+      ];
+
+      for (const st of starters) {
+        const gid = generateUid();
+        const guildData = {
+          id: gid,
+          name: st.name,
+          leaderId: user.uid,
+          weeklyFocusTime: st.focus,
+          weekId: currentWeekId,
+          memberCount: 1,
+          createdAt: new Date().toISOString(),
+          isPrivate: false,
+          inviteCode: ''
+        };
+        await setDoc(doc(db, 'guilds', gid), guildData);
+      }
+      setAdminSuccessMsg('✨ Firestoreに初期ギルドデータを再生成しました！');
+    } catch (e: any) {
+      console.error(e);
+      setErrorMessage(`ギルド再生成に失敗しました: ${e?.message || e}`);
+    } finally {
+      setIsRegeneratingGuilds(false);
+    }
+  };
 
   const handleExport = () => {
     const json = JSON.stringify(saveData, null, 2);
@@ -223,6 +267,35 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
               )}
             </div>
+
+            {/* 管理者専用メニュー (指定アカウントのみ表示) */}
+            {isAdminAccount && (
+              <div className="p-3 bg-amber-950/40 border border-amber-600/80 rounded space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-amber-300 flex items-center gap-1">
+                    🛠️ 管理者メニュー
+                  </span>
+                  <span className="text-[9px] bg-amber-900 text-amber-200 px-1.5 py-0.5 rounded border border-amber-600 font-bold">
+                    Admin
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-300 leading-tight">
+                  Firestoreのギルドコレクションを再構築し、初期ギルドデータを生成します。
+                </p>
+                {adminSuccessMsg && (
+                  <div className="text-[10px] text-emerald-300 bg-emerald-950/80 p-2 border border-emerald-600 rounded">
+                    {adminSuccessMsg}
+                  </div>
+                )}
+                <button
+                  onClick={handleRegenerateGuilds}
+                  disabled={isRegeneratingGuilds}
+                  className="pixel-btn w-full py-2 text-xs active !bg-amber-700 !border-amber-400 !text-amber-100 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  <span>{isRegeneratingGuilds ? '⏳ 生成中...' : '✨ 初期ギルドデータを再生成する'}</span>
+                </button>
+              </div>
+            )}
 
             <div className="text-xs text-slate-300 leading-relaxed p-2.5 bg-slate-950 border border-slate-800 rounded">
               <p className="text-[11px] text-amber-200/90 font-medium">

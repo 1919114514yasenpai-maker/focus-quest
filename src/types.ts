@@ -87,6 +87,7 @@ export interface PlayerItem {
   isUncursed?: boolean;
   unlockedSockets?: number; // 解放済みの穴の数
   slottedGems?: string[];   // はめ込まれた宝石のbaseIdリスト
+  engraving?: string;
 }
 
 export interface SaveData {
