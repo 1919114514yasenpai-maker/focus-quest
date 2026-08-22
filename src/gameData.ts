@@ -1,4 +1,4 @@
-import { GameItem, Monster, PlayerItem, ItemType } from './types';
+import { GameItem, Monster, PlayerItem, ItemType, MonsterDrop } from './types';
 
 export const ITEMS: Record<string, GameItem> = {
   // --- 武器 (WEAPONS) ---
@@ -9,7 +9,18 @@ export const ITEMS: Record<string, GameItem> = {
     power: 500,
     price: 15000000,
     color: '#fb7185',
+    isCraftOnly: true,
     effect: { description: '【クラフト限定】世界の終焉と創生を司る神剣。圧倒的な破壊力と自己再生力を併せ持つ。', critChance: 0.3, lifesteal: 0.1, damageMultiplier: 2.0, hpRegen: 50 }
+  },
+  'w_deep_sword': {
+    id: 'w_deep_sword',
+    name: '深淵の魔剣',
+    type: 'weapon',
+    power: 100, // クラフト時に強化されるベース
+    price: 1000000,
+    color: '#0ea5e9',
+    isCraftOnly: true,
+    effect: { description: '【深層クラフト限定】深層の素材で作られた魔剣。到達階層に応じて真の力を発揮する。', critChance: 0.2, lifesteal: 0.1 }
   },
   'w_wood_sword': {
     id: 'w_wood_sword',
@@ -146,7 +157,18 @@ export const ITEMS: Record<string, GameItem> = {
     power: 300,
     price: 15000000,
     color: '#38bdf8',
+    isCraftOnly: true,
     effect: { description: '【クラフト限定】星々の加護を受けた神の盾。あらゆる災厄を弾き返し、装備者に無限の活力を与える。', maxHpBonus: 5000, hpRegen: 200, damageMultiplier: 1.0, critChance: 0.1 }
+  },
+  'a_deep_armor': {
+    id: 'a_deep_armor',
+    name: '奈落の鎧',
+    type: 'armor',
+    power: 80, // クラフト時に強化されるベース
+    price: 1000000,
+    color: '#4c1d95',
+    isCraftOnly: true,
+    effect: { description: '【深層クラフト限定】奈落の核で作られた鎧。到達階層に応じて強固になる。毎秒HP回復+50。', maxHpBonus: 1000, hpRegen: 50 }
   },
   'a_cloth': {
     id: 'a_cloth',
@@ -374,6 +396,24 @@ export const ITEMS: Record<string, GameItem> = {
     color: '#ef4444',
     effect: { description: '特殊強化に使用する素材。究極の強化が可能。' }
   },
+  'm_deep_crystal': {
+    id: 'm_deep_crystal',
+    name: '深層の結晶',
+    type: 'material',
+    power: 0,
+    price: 3000,
+    color: '#0ea5e9',
+    effect: { description: '500F以降の深層の強敵が落とす神秘の結晶。深層武具のクラフトに使用でき、階層が深いほど強力な武具になる。' }
+  },
+  'm_abyss_core': {
+    id: 'm_abyss_core',
+    name: '奈落のコア',
+    type: 'material',
+    power: 0,
+    price: 10000,
+    color: '#4c1d95',
+    effect: { description: '1000F以降の最深部の魔物が落とす核。極めて強力な深層武具を生み出す。' }
+  },
 
   // --- 宝石 (GEMS) ---
   'g_fire_ruby': {
@@ -439,6 +479,7 @@ export const ITEMS: Record<string, GameItem> = {
     power: 0,
     price: 3000,
     color: '#facc15',
+    isCraftOnly: true,
     effect: { description: 'クラフトで作成。次に「解呪」を行うまで一時的に装備の呪い効果（自傷ダメージやステータス低下など）を無効化する。' }
   },
 
@@ -569,6 +610,18 @@ export const getMonsterForStage = (stage: number): Monster => {
     dragon: 'g_light_diamond'
   };
 
+  const drops: MonsterDrop[] = [
+    { itemId: dropMaterials[spriteType], chance: 0.2 + (stage % 3) * 0.1 }, // 20%~40% drop chance
+    { itemId: dropGems[spriteType], chance: 0.05 + Math.min(stage * 0.001, 0.1) } // 5%~15% rare gem drop
+  ];
+
+  if (stage >= 500) {
+    drops.push({ itemId: 'm_deep_crystal', chance: Math.min(0.05 + (stage - 500) * 0.0005, 0.5) });
+  }
+  if (stage >= 1000) {
+    drops.push({ itemId: 'm_abyss_core', chance: Math.min(0.01 + (stage - 1000) * 0.0003, 0.3) });
+  }
+
   return {
     id: `monster_stage_${stage}_${Math.random().toString(36).substring(2, 6)}`,
     name,
@@ -578,9 +631,16 @@ export const getMonsterForStage = (stage: number): Monster => {
     xpReward,
     goldReward,
     spriteType,
-    drops: [
-      { itemId: dropMaterials[spriteType], chance: 0.2 + (stage % 3) * 0.1 }, // 20%~40% drop chance
-      { itemId: dropGems[spriteType], chance: 0.05 + Math.min(stage * 0.001, 0.1) } // 5%~15% rare gem drop
-    ]
+    drops
   };
+};
+
+export const isCraftExclusiveItem = (itemOrId: GameItem | string | undefined | null): boolean => {
+  if (!itemOrId) return false;
+  const id = typeof itemOrId === 'string' ? itemOrId : itemOrId.id;
+  const item = typeof itemOrId === 'object' ? itemOrId : ITEMS[itemOrId];
+  if (item?.isCraftOnly) return true;
+  if (id.includes('craft_') || id.includes('deep_sword') || id.includes('deep_armor') || id === 'c_curse_breaker') return true;
+  if (item?.effect?.description?.includes('クラフト限定') || item?.effect?.description?.includes('深層クラフト限定')) return true;
+  return false;
 };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, orderBy, limit, getDocs, doc, setDoc, updateDoc, increment, getDoc, where, deleteDoc } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { db, auth, signInWithGoogle } from '../firebase';
 import { generateUid } from '../gameData';
 import { ItemIcon } from './Inventory';
 import { ITEMS } from '../gameData';
@@ -148,7 +148,11 @@ export const GuildRanking: React.FC<GuildRankingProps> = ({ onClose, inventory, 
   };
 
   useEffect(() => {
-    fetchData();
+    if (auth.currentUser) {
+      fetchData();
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   const handleCreateGuild = async () => {
@@ -378,6 +382,37 @@ export const GuildRanking: React.FC<GuildRankingProps> = ({ onClose, inventory, 
       console.error(e);
     }
   };
+
+  if (!auth.currentUser) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="pixel-panel max-w-md w-full bg-slate-900 border-2 border-indigo-500 p-6 text-center space-y-4 shadow-2xl">
+          <div className="text-4xl mb-1">🛡️ 🔒</div>
+          <h2 className="text-lg font-bold text-indigo-200">Googleログインが必要です</h2>
+          <p className="text-xs text-slate-300 leading-relaxed bg-slate-950 p-3.5 rounded border border-slate-800 text-left">
+            ギルド機能（ギルド結成・加入・集中ランキング・ギルドチャット・装備へのギルド名刻印など）を利用するには、Googleアカウントでのログインが必要です。
+          </p>
+          <div className="space-y-2 pt-2">
+            <button
+              onClick={async () => {
+                try {
+                  await signInWithGoogle();
+                } catch (e) {
+                  console.error(e);
+                }
+              }}
+              className="pixel-btn w-full py-2.5 text-xs flex items-center justify-center gap-2 active !bg-indigo-700 hover:!bg-indigo-600 !text-white font-bold !border-indigo-400"
+            >
+              <span>🌐</span> Googleアカウントでログイン
+            </button>
+            <button onClick={onClose} className="pixel-btn w-full py-2 text-xs !bg-slate-800 text-slate-400">
+              閉じる
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">

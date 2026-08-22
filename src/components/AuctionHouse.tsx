@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, orderBy, getDocs, doc, setDoc, updateDoc, getDoc } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { db, auth, signInWithGoogle } from '../firebase';
 import { generateUid } from '../gameData';
 import { ItemIcon } from './Inventory';
 import { ITEMS } from '../gameData';
@@ -41,9 +41,11 @@ interface AuctionHouseProps {
   onClose: () => void;
   inventory: PlayerItem[];
   gold: number;
+  creditScore: number;
   onRefreshGold: (amount: number) => void;
   onReceiveItem: (item: PlayerItem) => void;
   onRemoveItem: (uid: string) => void;
+  onUpdateCreditScore: (delta: number) => void;
 }
 
 // Safely remove any undefined values for Firestore serialization
@@ -143,9 +145,11 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
   onClose,
   inventory,
   gold,
+  creditScore,
   onRefreshGold,
   onReceiveItem,
   onRemoveItem,
+  onUpdateCreditScore,
 }) => {
   const [items, setItems] = useState<MarketItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -218,7 +222,11 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
   };
 
   useEffect(() => {
-    fetchItems();
+    if (auth.currentUser) {
+      fetchItems();
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   const handleSell = async () => {
@@ -348,9 +356,11 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
           bids: updatedBids,
         });
 
+        onUpdateCreditScore(5); // Reward for completing a direct purchase
+
         await fetchItems();
         const compiled = getSafeCompiledItem(normalizedItem);
-        alert(`🎉 「${compiled.name}」を ${cost.toLocaleString()} G で購入しました！\nアイテムをバッグに追加しました。`);
+        alert(`🎉 「${compiled.name}」を ${cost.toLocaleString()} G で購入しました！信用スコアがアップしました。\nアイテムをバッグに追加しました。`);
       } else {
         // Auction Bid
         if (cost <= currentData.currentBid || cost < currentData.startingBid) {
@@ -393,24 +403,27 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
 
   const handleCancelListing = async (item: MarketItem) => {
     if (item.sellerId !== auth.currentUser?.uid || item.status !== 'active') return;
+    
     if (item.currentBid > 0 && item.listingType === 'auction') {
-      alert('すでに入札が入っているため出品を取り消せません');
-      return;
+      if (!confirm('すでに入札が入っています。入札中の出品を取り消すと信用スコアが低下します。本当によろしいですか？')) {
+        return;
+      }
+      onUpdateCreditScore(-20); // Penalty for canceling with bids
+    } else {
+      if (!confirm('出品を取り消しますか？アイテムはインベントリに戻ります。')) return;
     }
 
-    if (confirm('出品を取り消しますか？アイテムはインベントリに戻ります。')) {
-      try {
-        await updateDoc(doc(db, 'market', item.id), {
-          status: 'canceled',
-          sellerClaimed: true,
-        });
-        onReceiveItem(normalizePlayerItem(item.itemData));
-        await fetchItems();
-        alert('出品を取り消し、アイテムを回収しました。');
-      } catch (e: any) {
-        console.error('Cancel listing error:', e);
-        alert(`取り消しに失敗しました: ${e?.message || e}`);
-      }
+    try {
+      await updateDoc(doc(db, 'market', item.id), {
+        status: 'canceled',
+        sellerClaimed: true,
+      });
+      onReceiveItem(normalizePlayerItem(item.itemData));
+      await fetchItems();
+      alert('出品を取り消し、アイテムを回収しました。');
+    } catch (e: any) {
+      console.error('Cancel listing error:', e);
+      alert(`取り消しに失敗しました: ${e?.message || e}`);
     }
   };
 
@@ -431,8 +444,9 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
         const normalized = normalizePlayerItem(item.itemData);
         onReceiveItem(normalized);
         const compiled = getSafeCompiledItem(normalized);
+        onUpdateCreditScore(5); // Reward for completing a purchase
         await fetchItems();
-        alert(`🎁 落札アイテム「${compiled.name}」を受け取りました！`);
+        alert(`🎁 落札アイテム「${compiled.name}」を受け取りました！信用スコアがアップしました。`);
         return;
       }
 
@@ -443,8 +457,9 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
           status: nextStatus,
         });
         onRefreshGold(item.currentBid);
+        onUpdateCreditScore(5); // Reward for completing a sale
         await fetchItems();
-        alert(`🪙 出品売上金 ${item.currentBid.toLocaleString()} G を受け取りました！`);
+        alert(`🪙 出品売上金 ${item.currentBid.toLocaleString()} G を受け取りました！信用スコアがアップしました。`);
         return;
       }
 
@@ -555,6 +570,37 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
     return false;
   });
 
+  if (!auth.currentUser) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+        <div className="pixel-panel max-w-md w-full bg-slate-900 border-2 border-amber-600 p-6 text-center space-y-4 shadow-[0_0_30px_rgba(217,119,6,0.35)]">
+          <div className="text-4xl mb-1">⚖️ 🔒</div>
+          <h2 className="text-lg font-bold text-amber-400">Googleログインが必要です</h2>
+          <p className="text-xs text-slate-300 leading-relaxed bg-slate-950 p-3.5 rounded border border-slate-800 text-left">
+            グローバル市場・取引所（オークション・定価ショップ）での武具の出品・入札・即決購入・売上ゴールド受取を利用するには、Googleアカウントでのログインが必要です。
+          </p>
+          <div className="space-y-2 pt-2">
+            <button
+              onClick={async () => {
+                try {
+                  await signInWithGoogle();
+                } catch (e) {
+                  console.error(e);
+                }
+              }}
+              className="pixel-btn w-full py-2.5 text-xs flex items-center justify-center gap-2 active !bg-amber-600 hover:!bg-amber-500 !text-slate-950 font-bold !border-amber-400 shadow-md"
+            >
+              <span>🌐</span> Googleアカウントでログイン
+            </button>
+            <button onClick={onClose} className="pixel-btn w-full py-2 text-xs !bg-slate-800 text-slate-400">
+              閉じる
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-fade-in">
       <div className="pixel-panel max-w-4xl w-full bg-slate-900 border-2 border-amber-600 p-3 sm:p-5 relative text-slate-100 shadow-[0_0_30px_rgba(217,119,6,0.35)] h-[92vh] flex flex-col">
@@ -570,6 +616,9 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
+            <span className="text-sky-300 font-bold text-[10px] sm:text-xs bg-slate-950 px-2 py-0.5 rounded border border-sky-800/60 hidden sm:inline-block">
+              信用スコア: <span className={creditScore >= 120 ? 'text-emerald-400 font-black' : creditScore < 80 ? 'text-rose-400 font-black' : 'text-sky-300'}>{creditScore}</span>
+            </span>
             <span className="text-amber-300 font-bold text-xs sm:text-sm bg-slate-950 px-2.5 py-1 rounded border border-amber-500/40">
               所持: 🪙 {gold.toLocaleString()} G
             </span>

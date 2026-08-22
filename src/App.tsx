@@ -47,6 +47,7 @@ export default function App() {
   const [showJobModal, setShowJobModal] = useState(false);
   const [showGuildRanking, setShowGuildRanking] = useState(false);
   const [showAuctionHouse, setShowAuctionHouse] = useState(false);
+  const [authPromptFeature, setAuthPromptFeature] = useState<'guild' | 'auction' | null>(null);
   const [myGuildName, setMyGuildName] = useState<string | undefined>();
   const [isJobMilestoneTrigger, setIsJobMilestoneTrigger] = useState(false);
 
@@ -361,8 +362,11 @@ export default function App() {
 
   const addXpAndGold = (gainedXp: number, gainedGold: number) => {
     const currentJob = stats.job || 'balanced';
-    const xpMult = 1 + (statWeaponItem?.effect?.xpBonus || 0) + (statArmorItem?.effect?.xpBonus || 0) + getXpBonusMultiplier(currentJob);
-    const goldMult = 1 + (statWeaponItem?.effect?.goldBonus || 0) + (statArmorItem?.effect?.goldBonus || 0) + getGoldBonusMultiplier(currentJob);
+    const creditScore = stats.creditScore || 100;
+    const creditScoreBonus = creditScore >= 120 ? 0.1 : creditScore < 80 ? -0.1 : 0;
+    
+    const xpMult = 1 + (statWeaponItem?.effect?.xpBonus || 0) + (statArmorItem?.effect?.xpBonus || 0) + getXpBonusMultiplier(currentJob) + creditScoreBonus;
+    const goldMult = 1 + (statWeaponItem?.effect?.goldBonus || 0) + (statArmorItem?.effect?.goldBonus || 0) + getGoldBonusMultiplier(currentJob) + creditScoreBonus;
 
     const finalXp = Math.floor(gainedXp * xpMult);
     const finalGold = Math.floor(gainedGold * goldMult);
@@ -560,6 +564,67 @@ export default function App() {
     showToast(`💰 「${baseItem?.name || '装備'}」を売却し、🪙 ${sellPrice} G を獲得しました。`);
   };
 
+  const handleBatchSellItems = (uids: string[], totalSellPrice: number) => {
+    if (!uids.length) return;
+    const validItems = inventory.filter(i => 
+      uids.includes(i.uid) && 
+      !i.isLocked && 
+      equipment.statWeaponId !== i.uid && 
+      equipment.statArmorId !== i.uid
+    );
+    if (!validItems.length) {
+      showToast('⚠️ 売却可能なアイテムが選択されていません。');
+      return;
+    }
+    const validUids = new Set(validItems.map(i => i.uid));
+    setStats(prev => ({ ...prev, gold: prev.gold + totalSellPrice }));
+    setInventory(prev => prev.filter(i => !validUids.has(i.uid)));
+    showToast(`💰 アイテム ${validItems.length} 個を一括売却し、🪙 ${totalSellPrice.toLocaleString()} G を獲得しました！`);
+  };
+
+  const handleBatchBuyItem = (baseId: string, quantity: number, unitPrice: number) => {
+    if (quantity <= 0) return;
+    const totalCost = quantity * unitPrice;
+    if (stats.gold < totalCost) {
+      showToast(`⚠️ ゴールドが足りません。(必要: 🪙 ${totalCost.toLocaleString()} G)`);
+      return;
+    }
+    setStats(prev => ({ ...prev, gold: prev.gold - totalCost }));
+    const newItems: PlayerItem[] = Array.from({ length: quantity }, () => ({
+      uid: generateUid(),
+      baseId,
+      upgradeLevel: 0,
+      limitBreak: 0,
+      addedPower: 0,
+    }));
+    setInventory(prev => [...prev, ...newItems]);
+    showToast(`🏪 「${ITEMS[baseId]?.name || 'アイテム'}」を ${quantity} 個まとめ買いしました！(消費: 🪙 ${totalCost.toLocaleString()} G)`);
+  };
+
+  const handleBatchBuyDailyItems = (dailyItemsToBuy: DailyShopItem[]) => {
+    const availableItems = dailyItemsToBuy.filter(d => !soldOutDailyItems.includes(d.shopItemId));
+    if (!availableItems.length) return;
+
+    const totalCost = availableItems.reduce((sum, item) => sum + item.price, 0);
+    if (stats.gold < totalCost) {
+      showToast(`⚠️ ゴールドが足りません。(必要: 🪙 ${totalCost.toLocaleString()} G)`);
+      return;
+    }
+
+    setStats(prev => ({ ...prev, gold: prev.gold - totalCost }));
+    const newItems: PlayerItem[] = availableItems.map(dailyItem => ({
+      uid: generateUid(),
+      baseId: dailyItem.baseId,
+      upgradeLevel: dailyItem.upgradeLevel,
+      limitBreak: 0,
+      addedPower: dailyItem.addedPower,
+      customPrefix: dailyItem.customPrefix,
+    }));
+    setInventory(prev => [...prev, ...newItems]);
+    setSoldOutDailyItems(prev => [...prev, ...availableItems.map(i => i.shopItemId)]);
+    showToast(`📅 日替わりアイテム ${availableItems.length} 品をまとめて全品購入しました！`);
+  };
+
   const handleUncurseItem = (uid: string, cost: number) => {
     const item = inventory.find(i => i.uid === uid);
     if (!item) return;
@@ -575,6 +640,8 @@ export default function App() {
 
   const handleCraftItem = (targetBaseId: string) => {
     let requiredMaterials: { id: string, count: number }[] = [];
+    let extraProps: Partial<PlayerItem> = {};
+    let targetBaseIdToCraft = targetBaseId;
 
     if (targetBaseId === 'c_curse_breaker') {
       const requiredCount = stats.job === 'artisan' ? 8 : 10;
@@ -586,6 +653,16 @@ export default function App() {
         ...['m_slime_jelly', 'm_goblin_ear', 'm_orc_fang', 'm_demon_horn', 'm_dragon_scale'].map(id => ({ id, count: matCount })),
         ...['g_fire_ruby', 'g_water_sapphire', 'g_thunder_topaz', 'g_light_diamond', 'g_dark_onyx'].map(id => ({ id, count: gemCount }))
       ];
+    } else if (targetBaseId === 'w_deep_sword' || targetBaseId === 'a_deep_armor') {
+      const crystalCount = stats.job === 'artisan' ? 8 : 10;
+      const coreCount = stats.job === 'artisan' ? 1 : 2;
+      requiredMaterials = [
+        { id: 'm_deep_crystal', count: crystalCount },
+        { id: 'm_abyss_core', count: coreCount }
+      ];
+      const deepBonus = Math.floor(stats.maxStageReached * 1.5);
+      extraProps.addedPower = deepBonus;
+      extraProps.engraving = auth.currentUser?.displayName || '名無し勇者';
     } else {
       return; // Unknown recipe
     }
@@ -616,10 +693,10 @@ export default function App() {
       });
       return [
         ...nextInv,
-        { uid: generateUid(), baseId: targetBaseId, upgradeLevel: 0, addedPower: 0 }
+        { uid: generateUid(), baseId: targetBaseIdToCraft, upgradeLevel: 0, addedPower: 0, ...extraProps }
       ];
     });
-    showToast(`✨ 「${ITEMS[targetBaseId].name}」をクラフトしました！`);
+    showToast(`✨ 「${ITEMS[targetBaseIdToCraft].name}」をクラフトしました！`);
   };
 
   const handleUseConsumable = (uid: string) => {
@@ -756,6 +833,37 @@ export default function App() {
     }
   };
 
+  const handleBatchLimitBreak = (targetUid: string, consumedUids: string[]) => {
+    if (!consumedUids.length) return;
+    const currentJob = stats.job || 'balanced';
+    const bonusPerCopy = getAppraiserPowerBonus(currentJob);
+    const totalBonus = bonusPerCopy * consumedUids.length;
+
+    setInventory(prev => {
+      const targetItem = prev.find(i => i.uid === targetUid);
+      if (!targetItem) return prev;
+
+      setEquipment(eq => {
+        const nextEq = { ...eq };
+        consumedUids.forEach(uid => {
+          if (nextEq.statWeaponId === uid) nextEq.statWeaponId = targetUid;
+          if (nextEq.statArmorId === uid) nextEq.statArmorId = targetUid;
+        });
+        return nextEq;
+      });
+
+      const consumedSet = new Set(consumedUids);
+      const newInventory = prev.filter(i => !consumedSet.has(i.uid));
+      return newInventory.map(i => i.uid === targetUid ? {
+        ...i,
+        limitBreak: (i.limitBreak || 0) + consumedUids.length,
+        addedPower: (i.addedPower || 0) + totalBonus,
+      } : i);
+    });
+
+    showToast(`🔨 同名装備 ${consumedUids.length} 個を一括合体し、限界突破 +${consumedUids.length} 凸に強化しました！${totalBonus > 0 ? ` (鑑定士特化ボーナス +${totalBonus})` : ''}`);
+  };
+
   const handleSpecialEnchant = (uid: string, materialUid: string, cost: number, newEffect: PlayerItem) => {
     if (stats.gold < cost) return;
     setStats(prev => ({ ...prev, gold: prev.gold - cost }));
@@ -766,6 +874,18 @@ export default function App() {
       // Update item
       return filtered.map(i => i.uid === uid ? { ...i, ...newEffect } : i);
     });
+  };
+
+  const handleBatchSpecialEnchant = (uid: string, consumedMaterialUids: string[], cost: number, newEffect: PlayerItem) => {
+    if (stats.gold < cost) return;
+    setStats(prev => ({ ...prev, gold: prev.gold - cost }));
+
+    const consumedSet = new Set(consumedMaterialUids);
+    setInventory(prev => {
+      const filtered = prev.filter(i => !consumedSet.has(i.uid));
+      return filtered.map(i => i.uid === uid ? { ...i, ...newEffect } : i);
+    });
+    showToast(`✨ 特殊強化を素材 ${consumedMaterialUids.length} 個分まとめて実行しました！`);
   };
 
   const handleEnchantItem = (uid: string, cost: number, newEffect: PlayerItem) => {
@@ -1064,19 +1184,35 @@ export default function App() {
         {/* Feature Row 2: Guild, Auction & Settings */}
         <div className="grid grid-cols-3 gap-2 w-full">
           <button
-            onClick={() => setShowGuildRanking(true)}
-            className="pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 flex items-center justify-center gap-1"
-            title="ギルドランキング"
+            onClick={() => {
+              if (!user) {
+                setAuthPromptFeature('guild');
+              } else {
+                setShowGuildRanking(true);
+              }
+            }}
+            className={`pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 flex items-center justify-center gap-1 ${
+              !user ? 'opacity-80 border-slate-700' : ''
+            }`}
+            title={!user ? 'ギルド（Googleログインが必要）' : 'ギルドランキング'}
           >
-            <span>🛡️</span> ギルド
+            <span>🛡️</span> ギルド {!user && <span className="text-[10px]">🔒</span>}
           </button>
 
           <button
-            onClick={() => setShowAuctionHouse(true)}
-            className="pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 flex items-center justify-center gap-1"
-            title="グローバルオークション"
+            onClick={() => {
+              if (!user) {
+                setAuthPromptFeature('auction');
+              } else {
+                setShowAuctionHouse(true);
+              }
+            }}
+            className={`pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 flex items-center justify-center gap-1 ${
+              !user ? 'opacity-80 border-slate-700' : ''
+            }`}
+            title={!user ? '取引所（Googleログインが必要）' : 'グローバルオークション'}
           >
-            <span>⚖️</span> 取引所
+            <span>⚖️</span> 取引所 {!user && <span className="text-[10px]">🔒</span>}
           </button>
 
           <button
@@ -1114,14 +1250,21 @@ export default function App() {
               equipment={equipment} 
               gold={stats.gold}
               job={stats.job || 'balanced'}
+              maxStage={stats.maxStageReached}
+              playerName={auth.currentUser?.displayName || '名無し勇者'}
               onEquip={(slot, id) => setEquipment(prev => ({ ...prev, [slot]: id }))}
               onBuyItem={handleBuyItem}
               onBuyDailyItem={handleBuyDailyItem}
+              onBatchBuyItem={handleBatchBuyItem}
+              onBatchBuyDailyItems={handleBatchBuyDailyItems}
               soldOutDailyItemIds={soldOutDailyItems}
               onEnchantItem={handleEnchantItem}
               onLimitBreak={handleLimitBreak}
+              onBatchLimitBreak={handleBatchLimitBreak}
               onSpecialEnchant={handleSpecialEnchant}
+              onBatchSpecialEnchant={handleBatchSpecialEnchant}
               onSellItem={handleSellItem}
+              onBatchSellItems={handleBatchSellItems}
               onDismantleItem={handleDismantleItem}
               onToggleLock={handleToggleLock}
               onUncurseItem={handleUncurseItem}
@@ -1150,11 +1293,65 @@ export default function App() {
         />
       )}
 
+      {authPromptFeature && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="pixel-panel max-w-sm w-full space-y-4 bg-slate-900 border-2 border-indigo-500/80 p-5 text-center shadow-2xl">
+            <div className="text-4xl mb-1">
+              {authPromptFeature === 'guild' ? '🛡️ 🔒' : '⚖️ 🔒'}
+            </div>
+            <h3 className="text-base font-bold text-slate-100">
+              Googleアカウントでのログインが必要です
+            </h3>
+            <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/80 p-3.5 rounded border border-slate-800 text-left">
+              {authPromptFeature === 'guild'
+                ? '🛡️ ギルドの結成・加入、週間集中ランキングへの参加は、セーブデータのオンライン同期と安全なプレイヤー識別のためにGoogleアカウントでのログインが必要です。'
+                : '⚖️ グローバル取引所（オークション・定価ショップ）での武具の出品・入札・即決購入は、他プレイヤーとの公正な取引管理のためにGoogleアカウントでのログインが必要です。'}
+            </p>
+            <div className="space-y-2 pt-1">
+              <button
+                onClick={async () => {
+                  const feat = authPromptFeature;
+                  setAuthPromptFeature(null);
+                  try {
+                    await handleLogin();
+                    if (feat === 'guild') setShowGuildRanking(true);
+                    if (feat === 'auction') setShowAuctionHouse(true);
+                  } catch (e) {
+                    console.error(e);
+                  }
+                }}
+                disabled={isLoggingIn}
+                className="pixel-btn w-full py-2.5 text-xs flex items-center justify-center gap-2 active !bg-indigo-700 hover:!bg-indigo-600 !text-white font-bold border-2 !border-indigo-400 shadow-lg disabled:opacity-50"
+              >
+                <span>🌐</span> {isLoggingIn ? '認証処理中...' : 'Googleアカウントでログイン'}
+              </button>
+              <button
+                onClick={() => setAuthPromptFeature(null)}
+                className="pixel-btn w-full py-2 text-xs !bg-slate-800 text-slate-400 hover:text-slate-200"
+              >
+                とじる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showGuildRanking && <GuildRanking onClose={() => setShowGuildRanking(false)} inventory={inventory} onEngrave={(uid, text) => {
         setInventory(prev => prev.map(item => item.uid === uid ? { ...item, engraving: text } : item));
         showToast('✨ ギルド名を刻印しました！');
       }} />}
-      {showAuctionHouse && <AuctionHouse onClose={() => setShowAuctionHouse(false)} inventory={inventory} gold={stats.gold} onRefreshGold={(amount) => setStats(s => ({ ...s, gold: Math.max(0, s.gold + amount) }))} onReceiveItem={(item) => setInventory(inv => [...inv, item])} onRemoveItem={(uid) => setInventory(inv => inv.filter(i => i.uid !== uid))} />}
+      {showAuctionHouse && (
+        <AuctionHouse 
+          onClose={() => setShowAuctionHouse(false)} 
+          inventory={inventory} 
+          gold={stats.gold} 
+          creditScore={stats.creditScore || 100}
+          onRefreshGold={(amount) => setStats(s => ({ ...s, gold: Math.max(0, s.gold + amount) }))} 
+          onReceiveItem={(item) => setInventory(inv => [...inv, item])} 
+          onRemoveItem={(uid) => setInventory(inv => inv.filter(i => i.uid !== uid))} 
+          onUpdateCreditScore={(delta) => setStats(s => ({ ...s, creditScore: Math.max(0, (s.creditScore || 100) + delta) }))}
+        />
+      )}
       {showSettings && (
         <Settings 
           onClose={() => setShowSettings(false)} 

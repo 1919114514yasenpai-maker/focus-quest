@@ -1,8 +1,16 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { EquipmentState, GameItem, PlayerItem, ItemEffect, JobType } from '../types';
-import { ITEMS } from '../gameData';
+import { ITEMS, isCraftExclusiveItem } from '../gameData';
 import { WEAPON_SPRITES, ARMOR_SPRITES, drawIconSprite } from '../sprites';
-import { getCompiledItem, calculateSellPrice, calculateUncurseCost } from '../itemUtils';
+import { 
+  getCompiledItem, 
+  calculateSellPrice, 
+  calculateUncurseCost,
+  calculateBatchEnchantCost,
+  calculateMaxEnchantLevels,
+  performBatchEnchant,
+  performBatchSpecialEnchant
+} from '../itemUtils';
 import { generateDailyShopItems, getTodayDateString, DailyShopItem } from '../dailyShopUtils';
 import { getShopDiscountMultiplier } from '../jobUtils';
 
@@ -124,14 +132,21 @@ interface InventoryProps {
   equipment: EquipmentState;
   gold: number;
   job?: JobType;
+  maxStage?: number;
+  playerName?: string;
   onEquip: (slot: keyof EquipmentState, itemId: string) => void;
   onBuyItem: (itemId: string, price: number) => void;
   onBuyDailyItem?: (item: DailyShopItem) => void;
+  onBatchBuyItem?: (itemId: string, quantity: number, unitPrice: number) => void;
+  onBatchBuyDailyItems?: (dailyItemsToBuy: DailyShopItem[]) => void;
   soldOutDailyItemIds?: string[];
   onEnchantItem: (uid: string, cost: number, newEffect: PlayerItem) => void;
   onLimitBreak?: (uid1: string, uid2: string) => void;
+  onBatchLimitBreak?: (targetUid: string, consumedUids: string[]) => void;
   onSpecialEnchant?: (uid: string, materialUid: string, cost: number, newEffect: PlayerItem) => void;
+  onBatchSpecialEnchant?: (uid: string, consumedMaterialUids: string[], cost: number, newEffect: PlayerItem) => void;
   onSellItem?: (uid: string, sellPrice: number) => void;
+  onBatchSellItems?: (uids: string[], totalSellPrice: number) => void;
   onDismantleItem?: (uid: string) => void;
   onToggleLock?: (uid: string) => void;
   onUncurseItem?: (uid: string, cost: number) => void;
@@ -151,14 +166,21 @@ export const Inventory: React.FC<InventoryProps> = ({
   equipment,
   gold,
   job = 'balanced' as JobType,
+  maxStage = 1,
+  playerName = '名無し勇者',
   onEquip,
   onBuyItem,
   onBuyDailyItem,
+  onBatchBuyItem,
+  onBatchBuyDailyItems,
   soldOutDailyItemIds = [],
   onEnchantItem,
   onLimitBreak,
+  onBatchLimitBreak,
   onSpecialEnchant,
+  onBatchSpecialEnchant,
   onSellItem,
+  onBatchSellItems,
   onDismantleItem,
   onToggleLock,
   onUncurseItem,
@@ -172,7 +194,7 @@ export const Inventory: React.FC<InventoryProps> = ({
   guildName,
   onEngraveItem,
 }) => {
-  const [tab, setTab] = useState<'inventory' | 'shop' | 'dailyShop' | 'forge' | 'materials'>('inventory');
+  const [tab, setTab] = useState<'inventory' | 'shop' | 'dailyShop' | 'forge' | 'craft' | 'materials'>('inventory');
   const [selectedMaterialUid, setSelectedMaterialUid] = useState<string>('');
   const [detailPlayerItem, setDetailPlayerItem] = useState<PlayerItem | null>(null);
   const [dismantleConfirmItem, setDismantleConfirmItem] = useState<{ item: PlayerItem; gameItem: GameItem } | null>(null);
@@ -180,6 +202,12 @@ export const Inventory: React.FC<InventoryProps> = ({
   const [transferScrollUid, setTransferScrollUid] = useState<string | null>(null);
   const [transferSourceUid, setTransferSourceUid] = useState<string>('');
   const [transferTargetUid, setTransferTargetUid] = useState<string>('');
+
+  // Bulk Actions State
+  const [batchSellMode, setBatchSellMode] = useState<boolean>(false);
+  const [selectedSellUids, setSelectedSellUids] = useState<string[]>([]);
+  const [shopQuantities, setShopQuantities] = useState<Record<string, number>>({});
+  const [specialEnchantQty, setSpecialEnchantQty] = useState<number>(1);
   
   const todayStr = getTodayDateString();
   const dailyItems = useMemo(() => generateDailyShopItems(todayStr), [todayStr]);
@@ -205,7 +233,7 @@ export const Inventory: React.FC<InventoryProps> = ({
     };
   }, [inventory]);
 
-  // ショップにはベースアイテムが並ぶ (素材・宝箱・呪い装備は除外)
+  // ショップにはベースアイテムが並ぶ (素材・宝箱・呪い装備・クラフト限定品は除外)
   const shopItems = useMemo(() => {
     return Object.values(ITEMS).filter(item => 
       item.type === 'weapon' || item.type === 'armor' || item.id === 'c_transfer_scroll'
@@ -213,7 +241,7 @@ export const Inventory: React.FC<InventoryProps> = ({
       item.price > 0 && 
       !item.isCursed && 
       !item.effect?.isCursed &&
-      !item.id.includes('craft_')
+      !isCraftExclusiveItem(item)
     );
   }, []);
 
@@ -223,6 +251,110 @@ export const Inventory: React.FC<InventoryProps> = ({
       setSelectedMaterialUid(materials[0].uid);
     }
   }, [materials, selectedMaterialUid]);
+
+  // --- 一括売却関連ヘルパー ---
+  const selectedSellTotalPrice = useMemo(() => {
+    return selectedSellUids.reduce((sum, uid) => {
+      const item = inventory.find(i => i.uid === uid);
+      if (!item) return sum;
+      return sum + calculateSellPrice(item, job);
+    }, 0);
+  }, [selectedSellUids, inventory, job]);
+
+  const toggleSelectSell = (uid: string) => {
+    const item = inventory.find(i => i.uid === uid);
+    if (!item || item.isLocked || equipment.statWeaponId === uid || equipment.statArmorId === uid) return;
+
+    setSelectedSellUids(prev => 
+      prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]
+    );
+  };
+
+  const handleSelectAllUnusedEquip = () => {
+    const valid = inventory.filter(i => {
+      const type = ITEMS[i.baseId]?.type;
+      const isEquip = type === 'weapon' || type === 'armor';
+      const isEquipped = equipment.statWeaponId === i.uid || equipment.statArmorId === i.uid;
+      return isEquip && !i.isLocked && !isEquipped;
+    }).map(i => i.uid);
+    setSelectedSellUids(valid);
+  };
+
+  const handleSelectAllUnenhanced = () => {
+    const valid = inventory.filter(i => {
+      const type = ITEMS[i.baseId]?.type;
+      const isEquip = type === 'weapon' || type === 'armor';
+      const isEquipped = equipment.statWeaponId === i.uid || equipment.statArmorId === i.uid;
+      const isClean = i.upgradeLevel === 0 && (!i.limitBreak || i.limitBreak === 0) && (!i.specialEnchantCount || i.specialEnchantCount === 0) && (i.addedPower === 0);
+      return isEquip && !i.isLocked && !isEquipped && isClean;
+    }).map(i => i.uid);
+    setSelectedSellUids(valid);
+  };
+
+  const handleSelectAllDuplicates = () => {
+    const groups: Record<string, PlayerItem[]> = {};
+    inventory.forEach(i => {
+      const type = ITEMS[i.baseId]?.type;
+      if (type === 'weapon' || type === 'armor') {
+        if (!groups[i.baseId]) groups[i.baseId] = [];
+        groups[i.baseId].push(i);
+      }
+    });
+
+    const selected: string[] = [];
+    Object.values(groups).forEach(items => {
+      if (items.length <= 1) return;
+      const sorted = [...items].sort((a, b) => {
+        const aEq = equipment.statWeaponId === a.uid || equipment.statArmorId === a.uid;
+        const bEq = equipment.statWeaponId === b.uid || equipment.statArmorId === b.uid;
+        if (aEq && !bEq) return -1;
+        if (!aEq && bEq) return 1;
+        if (a.isLocked && !b.isLocked) return -1;
+        if (!a.isLocked && b.isLocked) return 1;
+        const aPower = a.upgradeLevel * 3 + (a.limitBreak || 0) * 5 + a.addedPower;
+        const bPower = b.upgradeLevel * 3 + (b.limitBreak || 0) * 5 + b.addedPower;
+        return bPower - aPower;
+      });
+
+      for (let idx = 1; idx < sorted.length; idx++) {
+        const it = sorted[idx];
+        const isEq = equipment.statWeaponId === it.uid || equipment.statArmorId === it.uid;
+        if (!it.isLocked && !isEq) {
+          selected.push(it.uid);
+        }
+      }
+    });
+
+    setSelectedSellUids(selected);
+  };
+
+  const handleSelectAllMaterials = () => {
+    const valid = inventory.filter(i => {
+      const type = ITEMS[i.baseId]?.type;
+      return (type === 'material' || type === 'gem') && !i.isLocked;
+    }).map(i => i.uid);
+    setSelectedSellUids(valid);
+  };
+
+  const totalBatchSellPrice = useMemo(() => {
+    return selectedSellUids.reduce((sum, uid) => {
+      const item = inventory.find(i => i.uid === uid);
+      return sum + (item ? calculateSellPrice(item, job) : 0);
+    }, 0);
+  }, [selectedSellUids, inventory, job]);
+
+  const handleExecuteBatchSell = () => {
+    if (!selectedSellUids.length) return;
+    if (onBatchSellItems) {
+      onBatchSellItems(selectedSellUids, totalBatchSellPrice);
+    } else {
+      selectedSellUids.forEach(uid => {
+        const it = inventory.find(i => i.uid === uid);
+        if (it && onSellItem) onSellItem(uid, calculateSellPrice(it, job));
+      });
+    }
+    setSelectedSellUids([]);
+  };
 
   const handleEnchant = (pItem: PlayerItem) => {
     const cost = 200 + pItem.upgradeLevel * 100;
@@ -352,10 +484,34 @@ export const Inventory: React.FC<InventoryProps> = ({
       cardShadow = "shadow-[0_0_8px_rgba(217,119,6,0.3)]";
     }
 
+    const isSelectedForSell = selectedSellUids.includes(pItem.uid);
+    const canSelectForSell = !isStatEq && !pItem.isLocked && !isQuestActive;
+
     return (
-      <div key={item.id} className={`pixel-panel flex flex-col gap-2 border-2 ${cardBg} ${cardBorderColor} ${cardShadow} relative transition-all duration-300 hover:scale-[1.01]`}>
+      <div 
+        key={item.id} 
+        onClick={() => {
+          if (batchSellMode && canSelectForSell) {
+            toggleSelectSell(pItem.uid);
+          }
+        }}
+        className={`pixel-panel flex flex-col gap-2 border-2 ${cardBg} ${cardBorderColor} ${cardShadow} relative transition-all duration-300 hover:scale-[1.01] ${
+          batchSellMode ? (canSelectForSell ? 'cursor-pointer hover:border-amber-400' : 'opacity-60 cursor-not-allowed') : ''
+        } ${isSelectedForSell ? '!border-amber-400 !bg-amber-950/60 ring-2 ring-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.4)]' : ''}`}
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
+            {batchSellMode && (
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={isSelectedForSell}
+                  onChange={() => toggleSelectSell(pItem.uid)}
+                  disabled={!canSelectForSell}
+                  className="w-4 h-4 accent-amber-400 cursor-pointer rounded"
+                />
+              </div>
+            )}
             <ItemIcon item={{ ...item, id: pItem.baseId }} />
             <div>
               <div className="flex items-center gap-1.5 flex-wrap">
@@ -372,7 +528,7 @@ export const Inventory: React.FC<InventoryProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
             <button
               onClick={() => onToggleLock && onToggleLock(pItem.uid)}
               className="pixel-btn text-[10px] !py-1 !px-2.5 active hover:!bg-slate-700"
@@ -396,7 +552,7 @@ export const Inventory: React.FC<InventoryProps> = ({
         )}
 
         {tab === 'inventory' ? (
-          <div className="flex flex-col gap-2 mt-1">
+          <div className="flex flex-col gap-2 mt-1" onClick={e => e.stopPropagation()}>
             <div className="flex gap-2">
               <button
                 onClick={() => onEquip(statSlot, item.id)}
@@ -418,15 +574,15 @@ export const Inventory: React.FC<InventoryProps> = ({
               <span className="text-[10px] text-slate-400">売却価格: <span className="text-amber-300 font-bold">🪙 {sellPrice} G</span></span>
               <button
                 onClick={() => onSellItem && onSellItem(pItem.uid, sellPrice)}
-                disabled={isStatEq || isQuestActive}
+                disabled={isStatEq || isQuestActive || pItem.isLocked}
                 className="pixel-btn text-[10px] !py-1 !px-3 active !border-amber-400 disabled:opacity-40"
               >
-                {isStatEq ? '装備中不可' : '💰 売却する'}
+                {isStatEq ? '装備中不可' : pItem.isLocked ? 'ロック中' : '💰 売却する'}
               </button>
             </div>
           </div>
         ) : (
-          <div className="flex flex-col gap-2 mt-1 pt-2 border-t border-slate-800">
+          <div className="flex flex-col gap-2 mt-1 pt-2 border-t border-slate-800" onClick={e => e.stopPropagation()}>
             {/* Uncurse Section if Cursed */}
             {isCursedItem && (
               <div className="flex items-center justify-between bg-purple-950/80 p-2 border border-purple-700 rounded">
@@ -449,37 +605,128 @@ export const Inventory: React.FC<InventoryProps> = ({
               </div>
             )}
 
-            {/* Basic Enchant */}
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-slate-400">基本強化 (ゴールド消費)</span>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] text-amber-300 font-bold whitespace-nowrap">🪙 {200 + pItem.upgradeLevel * 100}</span>
-                <button
-                  onClick={() => handleEnchant(pItem)}
-                  disabled={gold < (200 + pItem.upgradeLevel * 100) || isQuestActive}
-                  className="pixel-btn text-[10px] !py-1 active !border-rose-400 disabled:opacity-40"
-                >
-                  基本強化 (+1)
-                </button>
+            {/* Basic Enchant with Batch Enhancements (+1, +5, +10, MAX) */}
+            <div className="flex flex-col gap-1.5 bg-slate-950 p-2 border border-slate-800 rounded">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-400 font-bold">基本強化 (現在 Lv.{pItem.upgradeLevel})</span>
+                <span className="text-[10px] text-amber-300 font-bold">次: 🪙 {(200 + pItem.upgradeLevel * 100).toLocaleString()} G</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                {(() => {
+                  const cost1 = 200 + pItem.upgradeLevel * 100;
+                  const cost5 = calculateBatchEnchantCost(pItem.upgradeLevel, 5);
+                  const cost10 = calculateBatchEnchantCost(pItem.upgradeLevel, 10);
+                  const { maxLevels, totalCost: maxCost } = calculateMaxEnchantLevels(pItem.upgradeLevel, gold);
+
+                  const formatCost = (c: number) => c >= 10000 ? `${(c/1000).toFixed(0)}k` : c >= 1000 ? `${(c/1000).toFixed(1)}k` : `${c}`;
+
+                  return (
+                    <>
+                      <button
+                        onClick={() => {
+                          const { updatedItem, totalCost } = performBatchEnchant(pItem, 1);
+                          onEnchantItem(pItem.uid, totalCost, updatedItem);
+                        }}
+                        disabled={gold < cost1 || isQuestActive}
+                        className="pixel-btn text-[10px] !py-1 active !border-rose-400 disabled:opacity-40"
+                        title={`1回強化 (費用: 🪙${cost1.toLocaleString()}G)`}
+                      >
+                        +1 ({formatCost(cost1)})
+                      </button>
+                      <button
+                        onClick={() => {
+                          const { updatedItem, totalCost } = performBatchEnchant(pItem, 5);
+                          onEnchantItem(pItem.uid, totalCost, updatedItem);
+                        }}
+                        disabled={gold < cost5 || isQuestActive}
+                        className="pixel-btn text-[10px] !py-1 active !border-rose-400 !bg-rose-950/40 hover:!bg-rose-900 disabled:opacity-40 font-bold"
+                        title={`5回まとめ強化 (費用: 🪙${cost5.toLocaleString()}G)`}
+                      >
+                        +5 ({formatCost(cost5)})
+                      </button>
+                      <button
+                        onClick={() => {
+                          const { updatedItem, totalCost } = performBatchEnchant(pItem, 10);
+                          onEnchantItem(pItem.uid, totalCost, updatedItem);
+                        }}
+                        disabled={gold < cost10 || isQuestActive}
+                        className="pixel-btn text-[10px] !py-1 active !border-amber-400 !bg-amber-950/40 hover:!bg-amber-900 disabled:opacity-40 font-bold"
+                        title={`10回まとめ強化 (費用: 🪙${cost10.toLocaleString()}G)`}
+                      >
+                        +10 ({formatCost(cost10)})
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (maxLevels <= 0) return;
+                          const { updatedItem, totalCost } = performBatchEnchant(pItem, maxLevels);
+                          onEnchantItem(pItem.uid, totalCost, updatedItem);
+                        }}
+                        disabled={maxLevels <= 0 || isQuestActive}
+                        className="pixel-btn text-[10px] !py-1 active !border-emerald-400 !bg-emerald-950/60 hover:!bg-emerald-900 text-emerald-200 disabled:opacity-40 font-black"
+                        title={`所持金で最大強化 (+${maxLevels}回 / 費用: 🪙${maxCost.toLocaleString()}G)`}
+                      >
+                        MAX{maxLevels > 0 ? `(+${maxLevels})` : ''}
+                      </button>
+                    </>
+                  );
+                })()}
               </div>
             </div>
 
-            {/* Limit Break / Merge */}
-            <div className="flex items-center justify-between border-t border-slate-800/50 pt-2">
-              <span className="text-[10px] text-slate-400">同名の装備を合体</span>
-              <button
-                onClick={() => handleLimitBreakClick(pItem)}
-                disabled={!duplicate || isQuestActive}
-                className="pixel-btn text-[10px] !py-1 disabled:opacity-40"
-              >
-                限界突破 (凸)
-              </button>
-            </div>
+            {/* Limit Break / Merge (1凸 or 一括合体) */}
+            {(() => {
+              const duplicates = inventory.filter(i => 
+                i.uid !== pItem.uid && 
+                i.baseId === pItem.baseId && 
+                !i.isLocked && 
+                equipment.statWeaponId !== i.uid && 
+                equipment.statArmorId !== i.uid
+              );
+
+              return (
+                <div className="flex items-center justify-between border-t border-slate-800/50 pt-2 flex-wrap gap-1">
+                  <div className="text-[10px] text-slate-400">
+                    同名装備合体 ({duplicates.length}個 所持)
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {duplicates.length > 0 && (
+                      <button
+                        onClick={() => {
+                          if (onLimitBreak) onLimitBreak(pItem.uid, duplicates[0].uid);
+                        }}
+                        disabled={isQuestActive}
+                        className="pixel-btn text-[10px] !py-1 active disabled:opacity-40"
+                      >
+                        +1凸
+                      </button>
+                    )}
+                    {duplicates.length > 1 && (
+                      <button
+                        onClick={() => {
+                          if (onBatchLimitBreak) {
+                            onBatchLimitBreak(pItem.uid, duplicates.map(d => d.uid));
+                          } else if (onLimitBreak) {
+                            duplicates.forEach(d => onLimitBreak(pItem.uid, d.uid));
+                          }
+                        }}
+                        disabled={isQuestActive}
+                        className="pixel-btn text-[10px] !py-1 active !bg-rose-900 !text-rose-100 !border-rose-400 hover:!bg-rose-800 disabled:opacity-40 font-bold"
+                      >
+                        🔨 全{duplicates.length}個一括合体 (+{duplicates.length}凸)
+                      </button>
+                    )}
+                    {duplicates.length === 0 && (
+                      <span className="text-[10px] text-slate-600">合体可能品なし</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
             
-            {/* Special Enchant */}
-            <div className="flex flex-col gap-1 bg-slate-950 p-2 border border-slate-800 rounded mt-1">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] text-slate-400">素材を消費して特殊強化 (ゴールド不要)</span>
+            {/* Special Enchant with Material Batch */}
+            <div className="flex flex-col gap-1.5 bg-slate-950 p-2 border border-slate-800 rounded mt-1">
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[10px] text-slate-400">素材で特殊強化 (ゴールド不要)</span>
                 <span className="text-[10px] text-purple-300 font-bold bg-purple-950 px-1.5 py-0.5 rounded border border-purple-800">
                   累計 {specialCount}回 強化済
                 </span>
@@ -493,9 +740,10 @@ export const Inventory: React.FC<InventoryProps> = ({
                   <option value="" disabled>素材を選択</option>
                   {materials.map(m => {
                     const baseMat = ITEMS[m.baseId];
+                    const count = materials.filter(mat => mat.baseId === m.baseId).length;
                     return (
-                      <option key={m.uid} value={m.uid}>{baseMat?.name}</option>
-                    )
+                      <option key={m.uid} value={m.uid}>{baseMat?.name} (所持: {count}個)</option>
+                    );
                   })}
                 </select>
               </div>
@@ -503,27 +751,70 @@ export const Inventory: React.FC<InventoryProps> = ({
               {selectedMaterialUid && (() => {
                 const selMat = materials.find(m => m.uid === selectedMaterialUid);
                 if (!selMat) return null;
+                const availableMats = materials.filter(m => m.baseId === selMat.baseId);
+                const matCount = availableMats.length;
+                const curQty = Math.min(specialEnchantQty || 1, matCount);
+
                 const matInfo: Record<string, string> = {
-                  'm_slime_jelly': '🟢 粘り属性: 敵の攻撃速度 -15% (粘液スロー)',
-                  'm_goblin_ear': '🔴 会心属性: クリティカル率 +5%',
-                  'm_orc_fang': '🟣 吸血属性: 攻撃時HP吸収 +3%',
-                  'm_demon_horn': '🟡 魔性属性: 毎秒HP回復+2 & 与ダメ+5%',
-                  'm_dragon_scale': '🐲 覇竜属性: 最大HP+30 & 獲得G+10%',
+                  'm_slime_jelly': `🟢 粘り属性: 敵の攻撃速度 -${Math.min(90, 15 * curQty)}% (粘液スロー)`,
+                  'm_goblin_ear': `🔴 会心属性: クリティカル率 +${Math.min(100, 5 * curQty)}%`,
+                  'm_orc_fang': `🟣 吸血属性: 攻撃時HP吸収 +${Math.min(100, 3 * curQty)}%`,
+                  'm_demon_horn': `🟡 魔性属性: 毎秒HP回復+${2 * curQty} & 与ダメ+${5 * curQty}%`,
+                  'm_dragon_scale': `🐲 覇竜属性: 最大HP+${30 * curQty} & 獲得G+${10 * curQty}%`,
                 };
+
                 return (
-                  <div className="text-[9px] text-purple-200 bg-purple-950/90 p-1.5 rounded border border-purple-800/90 mt-1">
-                    【付与予定】{matInfo[selMat.baseId] || '✨ 特殊効果付与'}
+                  <div className="flex flex-col gap-1.5 mt-1">
+                    <div className="text-[9px] text-purple-200 bg-purple-950/90 p-1.5 rounded border border-purple-800/90">
+                      【{curQty}個消費時の付与予定】{matInfo[selMat.baseId] || '✨ 特殊効果付与'} (能力+{(3 * curQty)}〜{(7 * curQty)})
+                    </div>
+                    
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <span className="text-[10px] text-slate-400">消費数:</span>
+                      <div className="flex gap-1">
+                        {[1, 5, 10].map(q => {
+                          if (q > matCount && q !== 1) return null;
+                          return (
+                            <button
+                              key={q}
+                              type="button"
+                              onClick={() => setSpecialEnchantQty(q)}
+                              className={`pixel-btn text-[9px] !py-0.5 !px-1.5 ${curQty === q ? 'active !border-purple-400 !text-purple-300' : ''}`}
+                            >
+                              ×{q}
+                            </button>
+                          );
+                        })}
+                        {matCount > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setSpecialEnchantQty(matCount)}
+                            className={`pixel-btn text-[9px] !py-0.5 !px-1.5 ${curQty === matCount ? 'active !border-purple-400 !text-purple-300' : ''}`}
+                          >
+                            全数(×{matCount})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        const toConsume = availableMats.slice(0, curQty).map(m => m.uid);
+                        const updatedItem = performBatchSpecialEnchant(pItem, selMat.baseId, curQty);
+                        if (onBatchSpecialEnchant) {
+                          onBatchSpecialEnchant(pItem.uid, toConsume, 0, updatedItem);
+                        } else if (onSpecialEnchant) {
+                          onSpecialEnchant(pItem.uid, toConsume[0], 0, updatedItem);
+                        }
+                      }}
+                      disabled={!selectedMaterialUid || matCount === 0 || isQuestActive}
+                      className="pixel-btn text-[10px] !py-1 active !border-purple-400 !bg-purple-900 hover:!bg-purple-800 !text-purple-100 disabled:opacity-40 font-bold mt-0.5"
+                    >
+                      ✨ 特殊強化を実行 (素材 ×{curQty}個 消費)
+                    </button>
                   </div>
                 );
               })()}
-
-              <button
-                onClick={() => handleSpecialEnchantClick(pItem)}
-                disabled={!selectedMaterialUid || isQuestActive}
-                className="pixel-btn text-[10px] !py-1 active !border-purple-400 disabled:opacity-40 mt-1"
-              >
-                特殊強化を実行
-              </button>
             </div>
 
             {/* Forge Resale / Sell Section */}
@@ -567,6 +858,14 @@ export const Inventory: React.FC<InventoryProps> = ({
     const shopDiscountMult = getShopDiscountMultiplier(job);
     const finalPrice = Math.floor(item.price * shopDiscountMult);
     const hasJobDiscount = shopDiscountMult < 1.0;
+    const qty = shopQuantities[item.id] || 1;
+    const totalCost = finalPrice * qty;
+    const maxAffordable = Math.max(1, Math.floor(gold / finalPrice));
+
+    const setQty = (val: number) => {
+      const sanitized = Math.max(1, Math.min(999, Math.floor(val)));
+      setShopQuantities(prev => ({ ...prev, [item.id]: sanitized }));
+    };
 
     return (
       <div key={item.id} className="pixel-panel flex flex-col gap-2 bg-slate-900/90 border-2 border-slate-700">
@@ -576,7 +875,7 @@ export const Inventory: React.FC<InventoryProps> = ({
             <span className="text-sm font-bold text-slate-100">{item.name}</span>
           </div>
           <span className="text-xs text-amber-400 font-bold">
-            {item.type === 'weapon' ? `攻撃力 ${item.power}` : `防御力 ${item.power}`}
+            {item.type === 'weapon' ? `攻撃力 ${item.power}` : item.type === 'armor' ? `防御力 ${item.power}` : ''}
           </span>
         </div>
         {item.effect && (
@@ -584,25 +883,88 @@ export const Inventory: React.FC<InventoryProps> = ({
             ✨ {item.effect.description}
           </div>
         )}
-        <div className="flex items-center justify-between mt-1 pt-2 border-t border-slate-800">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-amber-300 font-bold">🪙 {finalPrice} G</span>
-            {hasJobDiscount && (
-              <span className="text-[10px] text-slate-500 line-through">🪙 {item.price} G</span>
-            )}
-            {hasJobDiscount && (
-              <span className="text-[9px] bg-emerald-900 text-emerald-300 px-1 py-0.2 rounded font-bold border border-emerald-600">
-                特化割引
-              </span>
-            )}
+
+        {/* Quantity Controls & Bulk Buy */}
+        <div className="flex flex-col gap-1.5 mt-1 pt-2 border-t border-slate-800">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-amber-300 font-bold">🪙 {finalPrice} G</span>
+              {hasJobDiscount && (
+                <span className="text-[10px] text-slate-500 line-through">🪙 {item.price} G</span>
+              )}
+              {hasJobDiscount && (
+                <span className="text-[9px] bg-emerald-900 text-emerald-300 px-1 py-0.2 rounded font-bold border border-emerald-600">
+                  特化割引
+                </span>
+              )}
+            </div>
+
+            {/* Stepper */}
+            <div className="flex items-center gap-1 bg-slate-950 px-1 py-0.5 rounded border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setQty(qty - 1)}
+                disabled={qty <= 1}
+                className="pixel-btn text-[10px] !py-0.5 !px-1.5 disabled:opacity-30"
+              >
+                -
+              </button>
+              <input
+                type="number"
+                min={1}
+                max={999}
+                value={qty}
+                onChange={e => setQty(parseInt(e.target.value) || 1)}
+                className="w-10 text-center bg-slate-900 text-slate-200 text-xs font-bold border border-slate-700 rounded py-0.5"
+              />
+              <button
+                type="button"
+                onClick={() => setQty(qty + 1)}
+                className="pixel-btn text-[10px] !py-0.5 !px-1.5"
+              >
+                +
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => onBuyItem(item.id, finalPrice)}
-            disabled={gold < finalPrice || isQuestActive}
-            className="pixel-btn text-xs active !border-amber-400 disabled:opacity-40"
-          >
-            購入する
-          </button>
+
+          {/* Quick presets */}
+          <div className="flex items-center justify-between gap-1 flex-wrap">
+            <div className="flex gap-1">
+              {[1, 5, 10].map(preset => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setQty(preset)}
+                  className={`pixel-btn text-[9px] !py-0.5 !px-1.5 ${qty === preset ? 'active !border-amber-400 !text-amber-300' : ''}`}
+                >
+                  {preset}個
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setQty(maxAffordable)}
+                className={`pixel-btn text-[9px] !py-0.5 !px-1.5 ${qty === maxAffordable ? 'active !border-amber-400 !text-amber-300' : ''}`}
+              >
+                MAX({maxAffordable}個)
+              </button>
+            </div>
+
+            <button
+              onClick={() => {
+                if (qty === 1) {
+                  onBuyItem(item.id, finalPrice);
+                } else if (onBatchBuyItem) {
+                  onBatchBuyItem(item.id, qty, finalPrice);
+                } else {
+                  for (let i = 0; i < qty; i++) onBuyItem(item.id, finalPrice);
+                }
+              }}
+              disabled={gold < totalCost || isQuestActive}
+              className="pixel-btn text-xs active !border-amber-400 !bg-amber-950/60 hover:!bg-amber-900 font-bold disabled:opacity-40 !py-1 !px-3"
+            >
+              {qty > 1 ? `🛒 ${qty}個購入 (🪙${totalCost.toLocaleString()}G)` : '購入する'}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -1017,11 +1379,37 @@ export const Inventory: React.FC<InventoryProps> = ({
     if (!baseMat) return null;
     const isChest = baseMat.type === 'chest';
     const isConsumable = baseMat.type === 'consumable';
+    const sellPrice = calculateSellPrice(pItem, job);
+    const isSelected = selectedSellUids.includes(pItem.uid);
+    const canSelectForSell = !pItem.isLocked && !isQuestActive;
 
     return (
-      <div key={pItem.uid} className={`pixel-panel flex flex-col gap-2 bg-slate-900/90 border-2 ${isChest ? 'border-amber-500/70 bg-slate-900/95' : 'border-slate-700'}`}>
+      <div 
+        key={pItem.uid} 
+        onClick={() => {
+          if (batchSellMode && canSelectForSell) {
+            toggleSelectSell(pItem.uid);
+          }
+        }}
+        className={`pixel-panel flex flex-col gap-2 bg-slate-900/90 border-2 ${
+          isChest ? 'border-amber-500/70 bg-slate-900/95' : 'border-slate-700'
+        } ${batchSellMode ? (canSelectForSell ? 'cursor-pointer hover:border-amber-400' : 'opacity-60 cursor-not-allowed') : ''} ${
+          isSelected ? '!border-amber-400 !bg-amber-950/60 ring-2 ring-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.4)]' : ''
+        }`}
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
+            {batchSellMode && (
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => toggleSelectSell(pItem.uid)}
+                  disabled={!canSelectForSell}
+                  className="w-4 h-4 accent-amber-400 cursor-pointer rounded"
+                />
+              </div>
+            )}
             {isChest ? (
               <span className="text-xl select-none">
                 {baseMat.name.includes('伝説') ? '👑' : baseMat.name.includes('金') ? '🧰' : baseMat.name.includes('銀') ? '🎁' : '📦'}
@@ -1031,36 +1419,157 @@ export const Inventory: React.FC<InventoryProps> = ({
             ) : (
               <ItemIcon item={{ ...baseMat, id: pItem.baseId }} />
             )}
-            <span className="text-sm font-bold" style={{ color: baseMat.color }}>{baseMat.name}</span>
+            <div>
+              <span className="text-sm font-bold" style={{ color: baseMat.color }}>{baseMat.name}</span>
+              <div className="text-[10px] text-slate-400">
+                売却価格: <span className="text-amber-300 font-bold">🪙 {sellPrice} G</span>
+              </div>
+            </div>
           </div>
-          {isChest && onOpenChest && (
+
+          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
             <button
-              onClick={() => onOpenChest(pItem)}
-              disabled={isQuestActive}
-              className="pixel-btn text-xs !py-1 !px-2 font-bold !bg-amber-500 !text-slate-950 !border-amber-300 hover:!bg-amber-400 active:scale-95 disabled:opacity-40"
+              onClick={() => onToggleLock && onToggleLock(pItem.uid)}
+              className="pixel-btn text-[10px] !py-1 !px-2 active hover:!bg-slate-700"
+              title="ロックして売却・消費を防止"
             >
-              🔓 開封
+              {pItem.isLocked ? '🔒' : '🔓'}
             </button>
-          )}
-          {isConsumable && onUseConsumable && (
-            <button
-              onClick={() => {
-                if (baseMat.id === 'c_transfer_scroll') {
-                  setTransferScrollUid(pItem.uid);
-                } else {
-                  onUseConsumable(pItem.uid);
-                }
-              }}
-              disabled={isQuestActive}
-              className="pixel-btn text-xs !py-1 !px-2 font-bold !bg-emerald-700 !text-emerald-100 hover:!bg-emerald-600 active:scale-95 disabled:opacity-40"
-            >
-              使用する
-            </button>
-          )}
+            {isChest && onOpenChest && (
+              <button
+                onClick={() => onOpenChest(pItem)}
+                disabled={isQuestActive || pItem.isLocked}
+                className="pixel-btn text-xs !py-1 !px-2 font-bold !bg-amber-500 !text-slate-950 !border-amber-300 hover:!bg-amber-400 active:scale-95 disabled:opacity-40"
+              >
+                🔓 開封
+              </button>
+            )}
+            {isConsumable && onUseConsumable && (
+              <button
+                onClick={() => {
+                  if (baseMat.id === 'c_transfer_scroll') {
+                    setTransferScrollUid(pItem.uid);
+                  } else {
+                    onUseConsumable(pItem.uid);
+                  }
+                }}
+                disabled={isQuestActive || pItem.isLocked}
+                className="pixel-btn text-xs !py-1 !px-2 font-bold !bg-emerald-700 !text-emerald-100 hover:!bg-emerald-600 active:scale-95 disabled:opacity-40"
+              >
+                使用する
+              </button>
+            )}
+            {!isChest && !isConsumable && onSellItem && (
+              <button
+                onClick={() => onSellItem(pItem.uid, sellPrice)}
+                disabled={isQuestActive || pItem.isLocked}
+                className="pixel-btn text-[10px] !py-1 !px-2 active !border-amber-400 disabled:opacity-40"
+              >
+                売却
+              </button>
+            )}
+          </div>
         </div>
         {baseMat.effect && (
           <div className="text-[11px] text-slate-300 bg-slate-950 p-2 border border-slate-800 rounded">
             {baseMat.effect.description}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderBatchSellToolbar = () => {
+    return (
+      <div className="mb-4 bg-slate-950 p-3 rounded border-2 border-amber-500/80 shadow-md">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-2 pb-2 border-b border-slate-800">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-amber-300 flex items-center gap-1">
+              <span>💰 まとめ売り・一括売却モード</span>
+            </span>
+            <button
+              onClick={() => {
+                setBatchSellMode(!batchSellMode);
+                if (batchSellMode) setSelectedSellUids([]);
+              }}
+              className={`pixel-btn text-xs !py-1 !px-3 font-bold ${
+                batchSellMode ? 'active !border-rose-400 !bg-rose-950 !text-rose-200' : '!border-amber-400 !bg-amber-950/60 !text-amber-200'
+              }`}
+            >
+              {batchSellMode ? '✕ 一括売却モードを終了' : '⚡ 一括売却モードを開始'}
+            </button>
+          </div>
+
+          {batchSellMode && (
+            <div className="text-xs text-slate-300 flex items-center gap-2">
+              <span>選択中: <strong className="text-amber-300">{selectedSellUids.length}</strong> 個</span>
+              <span>合計: <strong className="text-amber-300 font-bold">🪙 {selectedSellTotalPrice.toLocaleString()} G</strong></span>
+            </div>
+          )}
+        </div>
+
+        {batchSellMode && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] text-slate-400 font-bold">一括選択:</span>
+              <button
+                type="button"
+                onClick={handleSelectAllUnusedEquip}
+                className="pixel-btn text-[10px] !py-0.5 !px-2 active hover:!bg-slate-800"
+              >
+                未装備武具を全選択
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectAllUnenhanced}
+                className="pixel-btn text-[10px] !py-0.5 !px-2 active hover:!bg-slate-800"
+              >
+                未強化武具を全選択
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectAllDuplicates}
+                className="pixel-btn text-[10px] !py-0.5 !px-2 active hover:!bg-slate-800"
+              >
+                重複所持品を全選択
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectAllMaterials}
+                className="pixel-btn text-[10px] !py-0.5 !px-2 active hover:!bg-slate-800"
+              >
+                素材・宝石を全選択
+              </button>
+              {selectedSellUids.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedSellUids([])}
+                  className="pixel-btn text-[10px] !py-0.5 !px-2 !border-slate-600 !text-slate-400 hover:!bg-slate-800"
+                >
+                  選択全解除
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
+              <span className="text-[10px] text-slate-400">
+                ※ ロック中のアイテムおよび装備中の武具は売却対象外です。
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedSellUids.length === 0) return;
+                  if (onBatchSellItems) {
+                    onBatchSellItems(selectedSellUids, selectedSellTotalPrice);
+                    setSelectedSellUids([]);
+                  }
+                }}
+                disabled={selectedSellUids.length === 0 || isQuestActive}
+                className="pixel-btn text-xs !py-1.5 !px-4 active !border-amber-400 !bg-amber-900 hover:!bg-amber-800 !text-amber-100 font-black disabled:opacity-30 shadow-[0_0_10px_rgba(245,158,11,0.3)]"
+              >
+                💰 選択した {selectedSellUids.length} 個を一括売却 (+🪙 {selectedSellTotalPrice.toLocaleString()} G)
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -1079,31 +1588,37 @@ export const Inventory: React.FC<InventoryProps> = ({
       <div className="flex gap-1 mb-4 border-b-2 border-slate-700 pb-3 flex-wrap">
         <button
           onClick={() => setTab('inventory')}
-          className={`pixel-btn text-[11px] flex-1 min-w-[75px] ${tab === 'inventory' ? 'active' : ''}`}
+          className={`pixel-btn text-[11px] flex-1 min-w-[70px] ${tab === 'inventory' ? 'active' : ''}`}
         >
           🎒 装備
         </button>
         <button
           onClick={() => setTab('forge')}
-          className={`pixel-btn text-[11px] flex-1 min-w-[75px] ${tab === 'forge' ? 'active' : ''}`}
+          className={`pixel-btn text-[11px] flex-1 min-w-[70px] ${tab === 'forge' ? 'active' : ''}`}
         >
           🔨 鍛冶屋
         </button>
         <button
+          onClick={() => setTab('craft')}
+          className={`pixel-btn text-[11px] flex-1 min-w-[70px] ${tab === 'craft' ? 'active !border-amber-400 !text-amber-300' : ''}`}
+        >
+          🛠️ クラフト
+        </button>
+        <button
           onClick={() => setTab('materials')}
-          className={`pixel-btn text-[11px] flex-1 min-w-[75px] ${tab === 'materials' ? 'active' : ''}`}
+          className={`pixel-btn text-[11px] flex-1 min-w-[70px] ${tab === 'materials' ? 'active' : ''}`}
         >
           💎 素材 {chests.length > 0 ? `(🎁${chests.length})` : ''}
         </button>
         <button
           onClick={() => setTab('dailyShop')}
-          className={`pixel-btn text-[11px] flex-1 min-w-[100px] ${tab === 'dailyShop' ? 'active !border-purple-400 !text-purple-300' : ''}`}
+          className={`pixel-btn text-[11px] flex-1 min-w-[95px] ${tab === 'dailyShop' ? 'active !border-purple-400 !text-purple-300' : ''}`}
         >
-          📅 日替わりショップ
+          📅 日替わり店
         </button>
         <button
           onClick={() => setTab('shop')}
-          className={`pixel-btn text-[11px] flex-1 min-w-[75px] ${tab === 'shop' ? 'active' : ''}`}
+          className={`pixel-btn text-[11px] flex-1 min-w-[70px] ${tab === 'shop' ? 'active' : ''}`}
         >
           🏪 通常店
         </button>
@@ -1111,19 +1626,22 @@ export const Inventory: React.FC<InventoryProps> = ({
 
       {tab === 'inventory' || tab === 'forge' ? (
         <div>
+          {renderBatchSellToolbar()}
+
           {tab === 'forge' ? (
             <div className="mb-4 text-xs leading-relaxed text-slate-300 bg-slate-950 p-3 border-2 border-slate-800 rounded">
               <p className="text-rose-400 font-bold mb-1">🔨 鍛冶屋工房</p>
               <p>【解呪 (呪い解除)】: ゴールドを消費し、呪い装備のHPドレインやデバフを聖なる力で浄化！</p>
-              <p>【基本強化】: ゴールドを消費してアイテムの基本性能をアップグレード！</p>
-              <p>【限界突破】: 同名の装備を消費して限界突破(+値が上昇)！</p>
-              <p>【特殊強化】: ドロップ素材を消費して追加能力を付与！(ゴールド不要)</p>
+              <p>【基本強化】: +1 / +5 / +10 / MAXまとめ強化に対応！</p>
+              <p>【限界突破】: 重複装備の一括合体に対応！</p>
+              <p>【特殊強化】: 素材を複数個まとめて一括消費強化に対応！</p>
             </div>
           ) : (
             <div className="mb-4 text-xs leading-relaxed text-slate-300 bg-slate-950 p-3 border-2 border-slate-800 rounded">
               <p className="text-amber-400 font-bold mb-1">💡 装備システムのヒント</p>
               <p>・【能力を装備】：攻撃力・防御力や自動HP回復・獲得量UP効果が反映されます。</p>
               <p>・【見た目を装備】：ステータスはそのままで、キャラクターの見た目だけを変更できます！</p>
+              <p>・【まとめ売り】：不要な装備や重複装備を一括選択してワンタップで換金できます！</p>
             </div>
           )}
           <h3 className="text-sm font-bold text-amber-300 mb-2 border-b border-slate-800 pb-1">🗡️ 武器</h3>
@@ -1136,85 +1654,288 @@ export const Inventory: React.FC<InventoryProps> = ({
             {armors.length > 0 ? armors.map(item => renderInventoryCard(item)) : <div className="text-xs text-slate-500">所持していません</div>}
           </div>
         </div>
-      ) : tab === 'materials' ? (
+      ) : tab === 'craft' ? (
         <div>
-          <div className="mb-4 bg-slate-950 p-3 rounded border border-slate-800">
-            <h3 className="text-sm font-bold text-amber-300 mb-2 border-b border-slate-800 pb-1 flex items-center justify-between">
-              <span>🛠️ アイテムクラフト</span>
-            </h3>
-            
-            <div className="space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <div>
-                  <div className="text-sm font-bold text-slate-100">📜 呪い封じの護符</div>
-                  <div className="text-[10px] text-slate-400 mt-1">
-                    全5種のモンスター素材 各{job === 'artisan' ? 8 : 10}個
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    if (onCraftItem) onCraftItem('c_curse_breaker');
-                  }}
-                  disabled={isQuestActive}
-                  className="pixel-btn text-xs !py-1 !px-3 font-bold !bg-amber-600 !text-slate-100 !border-amber-400 active:scale-95 disabled:opacity-40"
-                >
-                  作成
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <div>
-                  <div className="text-sm font-bold text-rose-300">⚔️ 終焉剣ラグナロク</div>
-                  <div className="text-[10px] text-slate-400 mt-1">
-                    全5種の素材 各{job === 'artisan' ? 40 : 50}個<br/>+ 全5種の属性宝石 各{job === 'artisan' ? 4 : 5}個
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    if (onCraftItem) onCraftItem('w_craft_ragnarok');
-                  }}
-                  disabled={isQuestActive}
-                  className="pixel-btn text-xs !py-1 !px-3 font-bold !bg-rose-900 !text-rose-100 !border-rose-500 active:scale-95 disabled:opacity-40"
-                >
-                  鍛造
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-bold text-sky-300">🛡️ 創星盾イージス</div>
-                  <div className="text-[10px] text-slate-400 mt-1">
-                    全5種の素材 各{job === 'artisan' ? 40 : 50}個<br/>+ 全5種の属性宝石 各{job === 'artisan' ? 4 : 5}個
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    if (onCraftItem) onCraftItem('a_craft_aegis');
-                  }}
-                  disabled={isQuestActive}
-                  className="pixel-btn text-xs !py-1 !px-3 font-bold !bg-sky-900 !text-sky-100 !border-sky-500 active:scale-95 disabled:opacity-40"
-                >
-                  鍛造
-                </button>
-              </div>
+          <div className="mb-4 bg-slate-950 p-3.5 rounded border-2 border-amber-500/70 shadow-md">
+            <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+              <h3 className="text-sm font-bold text-amber-300 flex items-center gap-1.5">
+                <span>🛠️ 秘術・深層クラフト工房</span>
+              </h3>
+              {job === 'artisan' && (
+                <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-500 px-2 py-0.5 rounded font-bold">
+                  🏛️ アルティザン特権: 素材20%軽減適用中！
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed mb-2">
+              モンスターのドロップ素材・属性宝石・深層素材を組み合わせて、特別な武具や護符を鍛造します。
+            </p>
+            <div className="text-[11px] text-sky-300 bg-sky-950/60 p-2 border border-sky-800/80 rounded flex items-center justify-between flex-wrap gap-2">
+              <span>🌌 <strong>深層武具ボーナス</strong>: クラフト時の最高到達階層（地下 <strong>{maxStage}</strong> 階）に応じてボーナス付与！</span>
+              <span className="text-amber-300 font-bold">付与威力: +{Math.floor(maxStage * 1.5)}</span>
             </div>
           </div>
-          
-          <h3 className="text-sm font-bold text-amber-300 mb-3 border-b border-slate-800 pb-1">💎 所持素材・宝箱・消費アイテム</h3>
+
+          <div className="space-y-3.5">
+            {(() => {
+              const isArtisan = job === 'artisan';
+              const matNormal = isArtisan ? 40 : 50;
+              const gemNormal = isArtisan ? 4 : 5;
+              const curseMat = isArtisan ? 8 : 10;
+              const deepCrystal = isArtisan ? 8 : 10;
+              const abyssCore = isArtisan ? 1 : 2;
+              const deepBonus = Math.floor(maxStage * 1.5);
+
+              // Calculate material counts
+              const matCounts: Record<string, number> = {};
+              inventory.forEach(item => {
+                matCounts[item.baseId] = (matCounts[item.baseId] || 0) + 1;
+              });
+
+              const recipes = [
+                {
+                  id: 'c_curse_breaker',
+                  name: '📜 呪い封じの護符',
+                  category: '消耗品 / 護符',
+                  color: '#f59e0b',
+                  desc: '使用すると解呪を行うまで呪い装備のマイナス効果を完全に無効化する。',
+                  statsPreview: 'マイナス効果無効化',
+                  isDeep: false,
+                  materials: [
+                    { id: 'm_slime_jelly', name: 'スライムゼリー', count: curseMat },
+                    { id: 'm_goblin_ear', name: 'ゴブリンの耳', count: curseMat },
+                    { id: 'm_orc_fang', name: 'オークの牙', count: curseMat },
+                    { id: 'm_demon_horn', name: '悪魔の角', count: curseMat },
+                    { id: 'm_dragon_scale', name: '竜の鱗', count: curseMat },
+                  ],
+                },
+                {
+                  id: 'w_craft_ragnarok',
+                  name: '⚔️ 終焉剣ラグナロク',
+                  category: '神話武器',
+                  color: '#f43f5e',
+                  desc: '神話の終焉を告げる究極の大剣。圧倒的な攻撃力とステータスを宿す。',
+                  statsPreview: '基本攻撃力 +250',
+                  isDeep: false,
+                  materials: [
+                    { id: 'm_slime_jelly', name: 'スライムゼリー', count: matNormal },
+                    { id: 'm_goblin_ear', name: 'ゴブリンの耳', count: matNormal },
+                    { id: 'm_orc_fang', name: 'オークの牙', count: matNormal },
+                    { id: 'm_demon_horn', name: '悪魔の角', count: matNormal },
+                    { id: 'm_dragon_scale', name: '竜の鱗', count: matNormal },
+                    { id: 'g_fire_ruby', name: '火のルビー', count: gemNormal },
+                    { id: 'g_water_sapphire', name: '水のサファイア', count: gemNormal },
+                    { id: 'g_thunder_topaz', name: '雷のトパーズ', count: gemNormal },
+                    { id: 'g_light_diamond', name: '光のダイヤモンド', count: gemNormal },
+                    { id: 'g_dark_onyx', name: '闇のオニキス', count: gemNormal },
+                  ],
+                },
+                {
+                  id: 'a_craft_aegis',
+                  name: '🛡️ 創星盾イージス',
+                  category: '神話防具',
+                  color: '#38bdf8',
+                  desc: 'あらゆる厄災を跳ね返す究極の聖盾。絶大な防御力と加護を得る。',
+                  statsPreview: '基本防御力 +250',
+                  isDeep: false,
+                  materials: [
+                    { id: 'm_slime_jelly', name: 'スライムゼリー', count: matNormal },
+                    { id: 'm_goblin_ear', name: 'ゴブリンの耳', count: matNormal },
+                    { id: 'm_orc_fang', name: 'オークの牙', count: matNormal },
+                    { id: 'm_demon_horn', name: '悪魔の角', count: matNormal },
+                    { id: 'm_dragon_scale', name: '竜の鱗', count: matNormal },
+                    { id: 'g_fire_ruby', name: '火のルビー', count: gemNormal },
+                    { id: 'g_water_sapphire', name: '水のサファイア', count: gemNormal },
+                    { id: 'g_thunder_topaz', name: '雷のトパーズ', count: gemNormal },
+                    { id: 'g_light_diamond', name: '光のダイヤモンド', count: gemNormal },
+                    { id: 'g_dark_onyx', name: '闇のオニキス', count: gemNormal },
+                  ],
+                },
+                {
+                  id: 'w_deep_sword',
+                  name: '⚔️ 深淵の魔剣',
+                  category: '深層スケーリング武器',
+                  color: '#38bdf8',
+                  desc: '500F/1000F深層素材から鍛造される魔剣。最高到達階層に応じたボーナス威力が永久付与され、作成者名が永遠に刻印される。',
+                  statsPreview: `基本攻撃力 +180 ＋ 階層ボーナス +${deepBonus} ＝ 合計 +${180 + deepBonus}`,
+                  isDeep: true,
+                  materials: [
+                    { id: 'm_deep_crystal', name: '深層の結晶 (500F~)', count: deepCrystal },
+                    { id: 'm_abyss_core', name: '奈落のコア (1000F~)', count: abyssCore },
+                  ],
+                },
+                {
+                  id: 'a_deep_armor',
+                  name: '🛡️ 奈落の鎧',
+                  category: '深層スケーリング防具',
+                  color: '#a855f7',
+                  desc: '500F/1000F深層素材から鍛造される重鎧。最高到達階層に応じたボーナス威力が永久付与され、作成者名が永遠に刻印される。',
+                  statsPreview: `基本防御力 +180 ＋ 階層ボーナス +${deepBonus} ＝ 合計 +${180 + deepBonus}`,
+                  isDeep: true,
+                  materials: [
+                    { id: 'm_deep_crystal', name: '深層の結晶 (500F~)', count: deepCrystal },
+                    { id: 'm_abyss_core', name: '奈落のコア (1000F~)', count: abyssCore },
+                  ],
+                },
+              ];
+
+              return recipes.map(recipe => {
+                const canCraft = recipe.materials.every(m => (matCounts[m.id] || 0) >= m.count);
+                const mockGameItem = ITEMS[recipe.id] || { id: recipe.id, name: recipe.name, type: 'weapon', color: recipe.color, price: 0, power: 0 };
+
+                return (
+                  <div 
+                    key={recipe.id} 
+                    className={`pixel-panel bg-slate-900 border-2 p-3 sm:p-3.5 transition-all ${
+                      canCraft 
+                        ? 'border-amber-400/90 shadow-[0_0_15px_rgba(245,158,11,0.2)] bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/20' 
+                        : 'border-slate-800 opacity-90'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2 border-b border-slate-800/80 pb-2 mb-2.5 flex-wrap">
+                      <div className="flex items-center gap-2.5">
+                        <ItemIcon item={{ ...mockGameItem, id: recipe.id }} size={36} />
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-bold" style={{ color: recipe.color }}>{recipe.name}</span>
+                            <span className="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700">
+                              {recipe.category}
+                            </span>
+                            {recipe.isDeep && (
+                              <span className="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-700 px-1.5 py-0.5 rounded font-bold">
+                                🛡️ 刻印: {playerName}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-amber-300/90 font-bold mt-0.5">
+                            📊 {recipe.statsPreview}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          if (onCraftItem) onCraftItem(recipe.id);
+                        }}
+                        disabled={!canCraft || isQuestActive}
+                        className={`pixel-btn text-xs !py-1.5 !px-3.5 font-bold whitespace-nowrap self-center sm:self-start ${
+                          canCraft
+                            ? '!bg-amber-600 !text-white !border-amber-300 hover:!bg-amber-500 active:scale-95 animate-pulse'
+                            : 'opacity-40 !bg-slate-800 !text-slate-400 !border-slate-700 cursor-not-allowed'
+                        }`}
+                      >
+                        {isQuestActive ? '🔒 クエスト中' : canCraft ? '✨ 鍛造する' : '素材不足'}
+                      </button>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 mb-2 leading-relaxed">
+                      {recipe.desc}
+                    </p>
+
+                    {/* 必要素材リスト */}
+                    <div className="bg-slate-950/80 p-2.5 rounded border border-slate-800/80">
+                      <div className="text-[10px] font-bold text-slate-400 mb-1.5 flex justify-between items-center">
+                        <span>📋 必要素材</span>
+                        {canCraft && <span className="text-emerald-400 font-bold">✅ クラフト可能です</span>}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {recipe.materials.map(mat => {
+                          const current = matCounts[mat.id] || 0;
+                          const satisfied = current >= mat.count;
+                          return (
+                            <span
+                              key={mat.id}
+                              className={`text-[10px] sm:text-[11px] px-2 py-0.5 rounded border flex items-center gap-1 ${
+                                satisfied
+                                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700 font-bold'
+                                  : 'bg-rose-950/40 text-rose-300 border-rose-800/60'
+                              }`}
+                            >
+                              <span>{ITEMS[mat.id]?.name || mat.name}:</span>
+                              <span className={satisfied ? 'text-emerald-200 font-black' : 'text-rose-400 font-black'}>
+                                {current}/{mat.count}
+                              </span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        </div>
+      ) : tab === 'materials' ? (
+        <div>
+          {renderBatchSellToolbar()}
+          <div className="mb-3 bg-slate-950 p-2.5 rounded border border-slate-800 flex justify-between items-center text-xs">
+            <span className="text-amber-300 font-bold">💎 素材・宝箱・消費アイテム一覧</span>
+            <span className="text-slate-400">所持数: {nonEquipItems.length} 個</span>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {nonEquipItems.length > 0 ? nonEquipItems.map(item => renderMaterialCard(item)) : <div className="text-xs text-slate-500">素材や宝箱を持っていません。集中クエストを完遂して宝箱を獲得しましょう！</div>}
+            {nonEquipItems.length > 0 ? nonEquipItems.map(item => renderMaterialCard(item)) : <div className="text-xs text-slate-500 p-4 text-center col-span-2">素材や宝箱を持っていません。集中クエストを完遂してモンスターを討伐し、宝箱や素材を獲得しましょう！</div>}
           </div>
         </div>
       ) : tab === 'dailyShop' ? (
         <div>
           <div className="mb-4 text-xs leading-relaxed text-purple-200 bg-purple-950/80 p-3 border-2 border-purple-700/80 rounded shadow-md">
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between mb-1 flex-wrap gap-1">
               <span className="text-purple-300 font-bold text-sm">📅 本日の闇市・限定日替わりショップ</span>
               <span className="text-[10px] text-purple-400 font-mono bg-purple-900/60 px-2 py-0.5 rounded border border-purple-700">【日付連動更新】</span>
             </div>
-            <p className="text-[11px] text-purple-300/90">
+            <p className="text-[11px] text-purple-300/90 mb-2">
               毎日新しい商品が入荷！驚異的な能力と凶悪なデバフを併せ持つ<span className="text-purple-300 font-bold">【💀 呪われた装備】</span>や、割引限定品が並びます。
             </p>
+
+            {/* Bulk Buy Daily Shop Banner */}
+            {(() => {
+              const availableItems = dailyItems.filter(item => !soldOutDailyItemIds.includes(item.shopItemId));
+              const shopDiscountMult = getShopDiscountMultiplier(job);
+              const totalBulkCost = availableItems.reduce((sum, item) => {
+                const finalPrice = Math.floor(item.price * shopDiscountMult);
+                return sum + finalPrice;
+              }, 0);
+
+              if (availableItems.length === 0) {
+                return (
+                  <div className="bg-purple-900/40 p-2 rounded border border-purple-800 text-[11px] text-purple-300 text-center font-bold">
+                    ✅ 本日の日替わり商品はすべて完売しました！また明日お越しください。
+                  </div>
+                );
+              }
+
+              return (
+                <div className="flex items-center justify-between bg-purple-900/60 p-2.5 rounded border border-purple-500/80 flex-wrap gap-2">
+                  <div className="text-[11px]">
+                    <div className="text-purple-200 font-bold">🛒 本日の入荷品まとめ買い</div>
+                    <div className="text-slate-300 text-[10px]">
+                      未購入 {availableItems.length} 品を一括購入: <span className="text-amber-300 font-bold">🪙 {totalBulkCost.toLocaleString()} G</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onBatchBuyDailyItems) {
+                        const itemsWithDiscount = availableItems.map(item => ({
+                          ...item,
+                          price: Math.floor(item.price * shopDiscountMult)
+                        }));
+                        onBatchBuyDailyItems(itemsWithDiscount, totalBulkCost);
+                      } else if (onBuyDailyItem) {
+                        availableItems.forEach(item => {
+                          onBuyDailyItem({ ...item, price: Math.floor(item.price * shopDiscountMult) });
+                        });
+                      }
+                    }}
+                    disabled={gold < totalBulkCost || isQuestActive}
+                    className="pixel-btn text-xs !py-1.5 !px-3.5 !bg-purple-800 hover:!bg-purple-700 !text-purple-100 !border-purple-300 font-bold active disabled:opacity-40 shadow-sm"
+                  >
+                    ⚡ 残り全{availableItems.length}品を一括購入
+                  </button>
+                </div>
+              );
+            })()}
           </div>
           <h3 className="text-sm font-bold text-purple-300 mb-3 border-b border-purple-900 pb-1 flex items-center justify-between">
             <span>💀 日替わり限定アイテム ({todayStr})</span>

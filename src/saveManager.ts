@@ -195,6 +195,7 @@ export function sanitizeSaveData(rawData: any): SaveData {
     job: (validJobs.includes(rawStats.job) ? rawStats.job : 'balanced'),
     lastJobChangeLevel: typeof rawStats.lastJobChangeLevel === 'number' ? rawStats.lastJobChangeLevel : undefined,
     hasCurseImmunity: Boolean(rawStats.hasCurseImmunity),
+    creditScore: typeof rawStats.creditScore === 'number' ? rawStats.creditScore : 100,
   };
 
   return {
