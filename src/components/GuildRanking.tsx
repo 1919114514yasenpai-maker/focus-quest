@@ -6,6 +6,7 @@ import { ItemIcon } from './Inventory';
 import { ITEMS } from '../gameData';
 import { PlayerItem } from '../types';
 import { getCompiledItem } from '../itemUtils';
+import { GuildShop } from './GuildShop';
 
 interface Guild {
   id: string;
@@ -35,10 +36,25 @@ interface Vote {
 interface GuildRankingProps {
   onClose: () => void;
   inventory: PlayerItem[];
+  gold?: number;
+  onRefreshGold?: (amount: number) => void;
+  onReceiveItem?: (item: PlayerItem) => void;
+  onRemoveItem?: (uid: string) => void;
   onEngrave: (uid: string, text: string) => void;
+  showToast?: (msg: string) => void;
 }
 
-export const GuildRanking: React.FC<GuildRankingProps> = ({ onClose, inventory, onEngrave }) => {
+export const GuildRanking: React.FC<GuildRankingProps> = ({
+  onClose,
+  inventory,
+  gold = 0,
+  onRefreshGold = () => {},
+  onReceiveItem = () => {},
+  onRemoveItem = () => {},
+  onEngrave,
+  showToast,
+}) => {
+  const [activeTab, setActiveTab] = useState<'info' | 'shop'>('info');
   const [guilds, setGuilds] = useState<Guild[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -417,15 +433,74 @@ export const GuildRanking: React.FC<GuildRankingProps> = ({ onClose, inventory, 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
       <div className="pixel-panel max-w-4xl w-full bg-slate-900 border-2 border-indigo-500 p-3 sm:p-5 relative text-slate-100 shadow-[0_0_25px_rgba(99,102,241,0.3)] h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-2 flex-shrink-0">
-          <h2 className="text-base sm:text-lg font-bold text-indigo-300 flex items-center gap-2">
-            <span>🛡️</span> ギルド (上限10人)
-          </h2>
+        <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-2 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <h2 className="text-base sm:text-lg font-bold text-indigo-300 flex items-center gap-2">
+              <span>🛡️</span> {myGuild ? myGuild.name : 'ギルド'}
+            </h2>
+
+            {/* Main Tabs */}
+            <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded border border-slate-800">
+              <button
+                onClick={() => setActiveTab('info')}
+                className={`pixel-btn text-xs !py-1 !px-2.5 flex items-center gap-1 ${
+                  activeTab === 'info'
+                    ? '!bg-indigo-700 !border-indigo-400 font-bold text-white shadow-sm'
+                    : '!bg-transparent !border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>🏆</span> ギルド情報
+              </button>
+
+              <button
+                onClick={() => setActiveTab('shop')}
+                className={`pixel-btn text-xs !py-1 !px-2.5 flex items-center gap-1 ${
+                  activeTab === 'shop'
+                    ? '!bg-emerald-700 !border-emerald-400 font-bold text-white shadow-sm'
+                    : '!bg-transparent !border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>🏪</span> ギルドショップ
+                {myGuild && <span className="text-[9px] bg-emerald-950 text-emerald-300 px-1 rounded border border-emerald-700">メンバー専用</span>}
+              </button>
+            </div>
+          </div>
+
           <button onClick={onClose} className="pixel-btn text-xs !bg-slate-800 !py-1 !px-2">閉じる</button>
         </div>
 
         {loading ? (
           <div className="text-center py-10 text-indigo-400 animate-pulse flex-1">読み込み中...</div>
+        ) : activeTab === 'shop' ? (
+          myGuild ? (
+            <GuildShop
+              guildId={myGuild.id}
+              guildName={myGuild.name}
+              isLeader={myGuild.leaderId === auth.currentUser?.uid}
+              inventory={inventory}
+              gold={gold}
+              onRefreshGold={onRefreshGold}
+              onReceiveItem={onReceiveItem}
+              onRemoveItem={onRemoveItem}
+              showToast={showToast}
+            />
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-slate-950/60 border border-slate-800 rounded-lg">
+              <div className="text-4xl mb-2">🏪 🔒</div>
+              <h3 className="text-sm sm:text-base font-bold text-indigo-300 mb-1">
+                ギルドショップはギルドメンバー専用です
+              </h3>
+              <p className="text-xs text-slate-400 max-w-md mb-4 leading-relaxed">
+                ギルドショップでは、所属ギルドのメンバー同士で武具・宝石・素材・護符などのアイテムを自由な価格で直接売買（P2Pトレード）できます。
+              </p>
+              <button
+                onClick={() => setActiveTab('info')}
+                className="pixel-btn text-xs !py-2 !px-4 !bg-indigo-700 !border-indigo-500 hover:!bg-indigo-600 font-bold text-white shadow-md"
+              >
+                🏆 ギルドに加入または設立する
+              </button>
+            </div>
+          )
         ) : (
           <div className="flex flex-col sm:flex-row gap-4 flex-1 overflow-hidden">
             {/* Left Col: Rankings / Create */}
@@ -551,12 +626,18 @@ export const GuildRanking: React.FC<GuildRankingProps> = ({ onClose, inventory, 
                         {myGuild.leaderId === auth.currentUser?.uid && myGuildMembers.length > 1 ? '解散・引退する' : '脱退する'}
                       </button>
                     </div>
-                    <div className="mt-2 text-right">
+                    <div className="mt-2 flex items-center justify-end gap-2">
+                      <button 
+                        onClick={() => setActiveTab('shop')} 
+                        className="pixel-btn text-[10px] !py-1 !px-2.5 !bg-emerald-700 hover:!bg-emerald-600 font-bold text-white flex items-center gap-1"
+                      >
+                        <span>🏪</span> ギルドショップ
+                      </button>
                       <button 
                         onClick={() => setShowEngraveModal(true)} 
                         className="pixel-btn text-[10px] !py-1 !px-2 !bg-indigo-700 hover:!bg-indigo-600"
                       >
-                        🛡️ 武具にギルド名を刻印する
+                        🛡️ 刻印する
                       </button>
                     </div>
                     

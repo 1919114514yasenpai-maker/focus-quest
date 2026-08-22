@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useMemo } from 'react';
 import { Monster, PlayerItem, JobType } from '../types';
 import { WEAPON_SPRITES, ARMOR_SPRITES, drawIconSprite } from '../sprites';
 import { getCompiledItem } from '../itemUtils';
-import { getDamageMultiplierBonus, getCritChanceBonus } from '../jobUtils';
+import { getDamageMultiplierBonus, getCritChanceBonus, getGoldBonusMultiplier, getXpBonusMultiplier } from '../jobUtils';
 
 interface HeroCanvasProps {
   isFocusing: boolean;
@@ -88,6 +88,13 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
     const dmgMult = Math.max(0.1, baseDmgMult);
     const monsterAttackInterval = Math.max(50, Math.floor(50 * (1 + enemySlowRate * 1.5)));
 
+    const jobGoldBonus = getGoldBonusMultiplier(effectiveJob);
+    const jobXpBonus = getXpBonusMultiplier(effectiveJob);
+    const totalGoldBonus = (weaponItem?.effect?.goldBonus || 0) + (armorItem?.effect?.goldBonus || 0) + jobGoldBonus;
+    const totalXpBonus = (weaponItem?.effect?.xpBonus || 0) + (armorItem?.effect?.xpBonus || 0) + jobXpBonus;
+    const goldMult = Math.max(0.1, 1 + totalGoldBonus);
+    const xpMult = Math.max(0.1, 1 + totalXpBonus);
+
     return {
       weaponPower,
       armorPower,
@@ -98,6 +105,10 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       elementalType,
       dmgMult,
       monsterAttackInterval,
+      goldMult,
+      xpMult,
+      totalGoldBonus,
+      totalXpBonus,
     };
   }, [inventory, statWeaponId, statArmorId, effectiveJob, hasCurseImmunity, isFocusing]);
 
@@ -334,10 +345,20 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
           onAttackMonster(damage, isCrit, lifestealHeal);
 
           if (currentEnemyHp <= 0) {
+            const finalXp = Math.max(1, Math.floor(currentMonster.xpReward * cStats.xpMult));
+            const finalGold = Math.max(1, Math.floor(currentMonster.goldReward * cStats.goldMult));
+
             spawnParticles(enemyX + 20, heroY - 40, '#a855f7', 25);
             addFloatingText('討伐成功!', enemyX, heroY - 80, '#38bdf8');
-            addFloatingText(`+${currentMonster.xpReward} EXP`, heroX, heroY - 80, '#38bdf8');
-            addFloatingText(`+${currentMonster.goldReward} G`, heroX + 20, heroY - 95, '#f59e0b');
+            addFloatingText(`+${finalXp} EXP`, heroX, heroY - 80, '#38bdf8');
+            addFloatingText(
+              cStats.goldMult > 1 
+                ? `+${finalGold} G (+${Math.round((cStats.goldMult - 1) * 100)}%)` 
+                : `+${finalGold} G`, 
+              heroX + 20, 
+              heroY - 95, 
+              '#f59e0b'
+            );
 
             onMonsterDefeated(currentMonster);
             enemyX = canvas.width + 100;

@@ -50,7 +50,7 @@ export const getCompiledItem = (playerItem: PlayerItem | undefined, ignoreCurses
   }
 
   // Effect merging
-  let effect: ItemEffect | undefined = baseEffect;
+  let effect: ItemEffect | undefined = baseEffect ? { ...baseEffect } : undefined;
   if (playerItem.addedEffect) {
     const descParts = [baseEffect?.description].filter(Boolean);
     if (playerItem.addedEffect.description) {
@@ -97,9 +97,14 @@ export const getCompiledItem = (playerItem: PlayerItem | undefined, ignoreCurses
         if (gem.effect) {
           effect!.description += `\n[${gem.name}] ${gem.effect.description}`;
           if (gem.effect.elementalDamage) effect!.elementalDamage = (effect!.elementalDamage || 0) + gem.effect.elementalDamage;
-          if (gem.effect.elementalType) effect!.elementalType = gem.effect.elementalType; // Overwrite for simplicity or maybe stack? Overwrite is fine.
+          if (gem.effect.elementalType) effect!.elementalType = gem.effect.elementalType;
           if (gem.effect.critChance) effect!.critChance = (effect!.critChance || 0) + gem.effect.critChance;
           if (gem.effect.hpRegen) effect!.hpRegen = (effect!.hpRegen || 0) + gem.effect.hpRegen;
+          if (gem.effect.goldBonus) effect!.goldBonus = (effect!.goldBonus || 0) + gem.effect.goldBonus;
+          if (gem.effect.xpBonus) effect!.xpBonus = (effect!.xpBonus || 0) + gem.effect.xpBonus;
+          if (gem.effect.maxHpBonus) effect!.maxHpBonus = (effect!.maxHpBonus || 0) + gem.effect.maxHpBonus;
+          if (gem.effect.damageMultiplier) effect!.damageMultiplier = (effect!.damageMultiplier || 0) + gem.effect.damageMultiplier;
+          if (gem.effect.lifesteal) effect!.lifesteal = (effect!.lifesteal || 0) + gem.effect.lifesteal;
         }
       }
     });

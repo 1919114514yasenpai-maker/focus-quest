@@ -360,16 +360,25 @@ export default function App() {
     setPendingChestFocusMins(undefined);
   };
 
-  const addXpAndGold = (gainedXp: number, gainedGold: number) => {
+  const addXpAndGold = React.useCallback((gainedXp: number, gainedGold: number) => {
+    const currentWeapon = getCompiledItem(
+      inventory.find(i => i.uid === equipment.statWeaponId),
+      stats.hasCurseImmunity
+    );
+    const currentArmor = getCompiledItem(
+      inventory.find(i => i.uid === equipment.statArmorId),
+      stats.hasCurseImmunity
+    );
+
     const currentJob = stats.job || 'balanced';
     const creditScore = stats.creditScore || 100;
     const creditScoreBonus = creditScore >= 120 ? 0.1 : creditScore < 80 ? -0.1 : 0;
     
-    const xpMult = 1 + (statWeaponItem?.effect?.xpBonus || 0) + (statArmorItem?.effect?.xpBonus || 0) + getXpBonusMultiplier(currentJob) + creditScoreBonus;
-    const goldMult = 1 + (statWeaponItem?.effect?.goldBonus || 0) + (statArmorItem?.effect?.goldBonus || 0) + getGoldBonusMultiplier(currentJob) + creditScoreBonus;
+    const xpMult = Math.max(0.1, 1 + (currentWeapon?.effect?.xpBonus || 0) + (currentArmor?.effect?.xpBonus || 0) + getXpBonusMultiplier(currentJob) + creditScoreBonus);
+    const goldMult = Math.max(0.1, 1 + (currentWeapon?.effect?.goldBonus || 0) + (currentArmor?.effect?.goldBonus || 0) + getGoldBonusMultiplier(currentJob) + creditScoreBonus);
 
-    const finalXp = Math.floor(gainedXp * xpMult);
-    const finalGold = Math.floor(gainedGold * goldMult);
+    const finalXp = Math.max(1, Math.floor(gainedXp * xpMult));
+    const finalGold = Math.max(1, Math.floor(gainedGold * goldMult));
 
     let reachedMilestoneLevel = 0;
 
@@ -404,7 +413,7 @@ export default function App() {
         showToast(`⚡ 祝・Lv.${reachedMilestoneLevel}到達！ 転職の儀式が発動しました！`);
       }
     }
-  };
+  }, [inventory, equipment.statWeaponId, equipment.statArmorId, stats.job, stats.creditScore, stats.hasCurseImmunity]);
 
   const handleAttackMonster = React.useCallback((damage: number, isCrit: boolean, lifestealHeal: number) => {
     if (lifestealHeal > 0) {
@@ -444,7 +453,7 @@ export default function App() {
         maxStageReached: nextMaxStage,
       };
     });
-  }, []);
+  }, [addXpAndGold]);
 
   const handlePlayerTakeDamage = React.useCallback((damage: number) => {
     setStats(prev => {
@@ -959,13 +968,18 @@ export default function App() {
   const hpPercent = Math.min(100, Math.max(0, (stats.hp / stats.maxHp) * 100));
 
   const activeEffects: string[] = [];
-  const totalGoldBonus = (statWeaponItem?.effect?.goldBonus || 0) + (statArmorItem?.effect?.goldBonus || 0);
-  const totalXpBonus = (statWeaponItem?.effect?.xpBonus || 0) + (statArmorItem?.effect?.xpBonus || 0);
+  const jobGoldBonus = getGoldBonusMultiplier(stats.job || 'balanced');
+  const jobXpBonus = getXpBonusMultiplier(stats.job || 'balanced');
+  const creditScore = stats.creditScore || 100;
+  const creditScoreBonus = creditScore >= 120 ? 0.1 : creditScore < 80 ? -0.1 : 0;
+
+  const totalGoldBonus = (statWeaponItem?.effect?.goldBonus || 0) + (statArmorItem?.effect?.goldBonus || 0) + jobGoldBonus + creditScoreBonus;
+  const totalXpBonus = (statWeaponItem?.effect?.xpBonus || 0) + (statArmorItem?.effect?.xpBonus || 0) + jobXpBonus + creditScoreBonus;
 
   if (stats.hasCurseImmunity) activeEffects.push(`📜 呪い無効化 (次回の解呪まで)`);
   if (statWeaponItem?.effect?.critChance) activeEffects.push(`会心率 +${Math.floor(statWeaponItem.effect.critChance * 100)}%`);
-  if (totalGoldBonus > 0) activeEffects.push(`獲得G +${Math.floor(totalGoldBonus * 100)}%`);
-  if (totalXpBonus > 0) activeEffects.push(`獲得EXP +${Math.floor(totalXpBonus * 100)}%`);
+  if (totalGoldBonus !== 0) activeEffects.push(`獲得G ${totalGoldBonus > 0 ? '+' : ''}${Math.round(totalGoldBonus * 100)}%`);
+  if (totalXpBonus !== 0) activeEffects.push(`獲得EXP ${totalXpBonus > 0 ? '+' : ''}${Math.round(totalXpBonus * 100)}%`);
   if (statWeaponItem?.effect?.lifesteal) activeEffects.push(`攻撃吸血 +${Math.floor(statWeaponItem.effect.lifesteal * 100)}%`);
   const currentHpRegen = statArmorItem?.effect?.hpRegen || 1;
   activeEffects.push(`毎秒HP回復 +${currentHpRegen}`);
@@ -1336,10 +1350,21 @@ export default function App() {
         </div>
       )}
 
-      {showGuildRanking && <GuildRanking onClose={() => setShowGuildRanking(false)} inventory={inventory} onEngrave={(uid, text) => {
-        setInventory(prev => prev.map(item => item.uid === uid ? { ...item, engraving: text } : item));
-        showToast('✨ ギルド名を刻印しました！');
-      }} />}
+      {showGuildRanking && (
+        <GuildRanking 
+          onClose={() => setShowGuildRanking(false)} 
+          inventory={inventory} 
+          gold={stats.gold}
+          onRefreshGold={(amount) => setStats(s => ({ ...s, gold: Math.max(0, s.gold + amount) }))}
+          onReceiveItem={(item) => setInventory(inv => [...inv, item])}
+          onRemoveItem={(uid) => setInventory(inv => inv.filter(i => i.uid !== uid))}
+          onEngrave={(uid, text) => {
+            setInventory(prev => prev.map(item => item.uid === uid ? { ...item, engraving: text } : item));
+            showToast('✨ ギルド名を刻印しました！');
+          }} 
+          showToast={showToast}
+        />
+      )}
       {showAuctionHouse && (
         <AuctionHouse 
           onClose={() => setShowAuctionHouse(false)} 
