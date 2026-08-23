@@ -1,6 +1,7 @@
 {
   "name": "Focus Quest",
-  "description": "A gamified Pomodoro timer app where your focus powers an 8-bit hero to defeat enemies and earn loot.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "description": "A retro Pomodoro timer where your pixel hero battles monsters and levels up while you stay focused.",
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
