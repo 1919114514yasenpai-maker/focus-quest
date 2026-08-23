@@ -32,6 +32,24 @@ export const PALETTE: Record<string, string> = {
 };
 
 export const WEAPON_SPRITES: Record<string, string[]> = {
+  'w_deep_sword': [
+    "       P!       ",
+    "      Pmm!      ",
+    "      mwwm      ",
+    "     Pwmww!     ",
+    "     mwwwm!     ",
+    "    Pwmwwm!     ",
+    "    mwwwwm!     ",
+    "   Pwmwwwm!     ",
+    "   mwwwwwm!     ",
+    "  ##!mwwm!##    ",
+    " #D##!mm!##D#   ",
+    "  #DD#!w!#DD#   ",
+    "   ###!w!###    ",
+    "      #w#       ",
+    "      #P#       ",
+    "       #        ",
+  ],
   'w_craft_ragnarok': [
     "       !!       ",
     "      !wm!      ",
@@ -360,6 +378,24 @@ export const WEAPON_SPRITES: Record<string, string[]> = {
 
 
 export const ARMOR_SPRITES: Record<string, string[]> = {
+  'a_deep_armor': [
+    "   ##########   ",
+    "  #PmmmmmmmmP#  ",
+    " #PmwbbbbbbwmP# ",
+    " #PmbwmmmwmbmP# ",
+    " #PmbmbmbmbwmP# ",
+    " #mwwmbbbbmwwm# ",
+    " #mbwwmbbmwwbm# ",
+    " #mbmbwwmwwmbm# ",
+    " #mbmmmwmwwybm# ",
+    " #mwwmbbbbmwwm# ",
+    " #PmwbbbbbbwmP# ",
+    "  #PmmmmmmmmP#  ",
+    "  #PbbbbbbbbP#  ",
+    "   #PbbbbbbP#   ",
+    "    #PbbbbP#    ",
+    "     #PbbP#     ",
+  ],
   'a_craft_aegis': [
     "   ##########   ",
     "  #YbbbbbbbbY#  ",

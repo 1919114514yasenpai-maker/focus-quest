@@ -76,6 +76,7 @@ const normalizePlayerItem = (rawItem: any): PlayerItem => {
   if (rawItem.isUncursed !== undefined && rawItem.isUncursed !== null) cleanItem.isUncursed = Boolean(rawItem.isUncursed);
   if (rawItem.unlockedSockets !== undefined && rawItem.unlockedSockets !== null) cleanItem.unlockedSockets = Number(rawItem.unlockedSockets);
   if (rawItem.slottedGems !== undefined && Array.isArray(rawItem.slottedGems)) cleanItem.slottedGems = rawItem.slottedGems;
+  if (rawItem.packedItems !== undefined && Array.isArray(rawItem.packedItems)) cleanItem.packedItems = rawItem.packedItems.map(normalizePlayerItem);
   return cleanItem;
 };
 
@@ -934,6 +935,9 @@ export const GuildShop: React.FC<GuildShopProps> = ({
                               )}
                               {item.note && (
                                 <span className="text-slate-500 italic">「{item.note}」</span>
+                              )}
+                              {item.itemData.packedItems && item.itemData.packedItems.length > 0 && (
+                                <span className="text-amber-300 font-bold">🎁 {item.itemData.packedItems.length}個のアイテム同梱</span>
                               )}
                             </div>
                           </div>
