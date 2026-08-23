@@ -1,4 +1,4 @@
-import { ITEMS, isCraftExclusiveItem } from './gameData';
+import { ITEMS } from './gameData';
 
 export interface DailyShopItem {
   shopItemId: string;
@@ -31,14 +31,10 @@ export const generateDailyShopItems = (dateStr: string): DailyShopItem[] => {
   const hash = simpleHash(dateStr);
   
   const allKeys = Object.keys(ITEMS);
-  const cursedKeys = allKeys.filter(k => ITEMS[k].isCursed && !isCraftExclusiveItem(ITEMS[k]));
-  const equipKeys = allKeys.filter(k => 
-    (ITEMS[k].type === 'weapon' || ITEMS[k].type === 'armor') && 
-    !ITEMS[k].isCursed && 
-    !isCraftExclusiveItem(ITEMS[k])
-  );
-  const chestKeys = allKeys.filter(k => ITEMS[k].type === 'chest' && !isCraftExclusiveItem(ITEMS[k]));
-  const matKeys = allKeys.filter(k => ITEMS[k].type === 'material' && !isCraftExclusiveItem(ITEMS[k]));
+  const cursedKeys = allKeys.filter(k => ITEMS[k].isCursed);
+  const equipKeys = allKeys.filter(k => (ITEMS[k].type === 'weapon' || ITEMS[k].type === 'armor') && !ITEMS[k].isCursed);
+  const chestKeys = allKeys.filter(k => ITEMS[k].type === 'chest');
+  const matKeys = allKeys.filter(k => ITEMS[k].type === 'material');
 
   const result: DailyShopItem[] = [];
 

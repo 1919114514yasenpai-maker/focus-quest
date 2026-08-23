@@ -92,11 +92,7 @@ export const ChestModal: React.FC<ChestModalProps> = ({ reward, focusMinutes, on
                               {compiled.name}
                             </div>
                             <div className="text-[10px] text-slate-400">
-                              {baseItem.type === 'weapon'
-                                ? `攻撃力 +${compiled.power}`
-                                : baseItem.type === 'armor'
-                                ? `防御力 +${compiled.power}`
-                                : baseItem.effect?.description || (baseItem.type === 'material' ? '鍛冶・特殊強化素材' : baseItem.type === 'chest' ? '開封可能な宝箱' : baseItem.type === 'gem' ? 'ソケット装着用宝石' : 'アイテム')}
+                              {baseItem.type === 'weapon' ? `攻撃力 +${compiled.power}` : baseItem.type === 'armor' ? `防御力 +${compiled.power}` : baseItem.effect?.description}
                             </div>
                           </div>
                         </div>

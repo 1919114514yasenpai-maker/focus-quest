@@ -25,7 +25,6 @@ export interface GameItem {
   color: string;         // レンダリング用カラー
   effect?: ItemEffect;   // 特殊効果
   isCursed?: boolean;    // 呪いフラグ
-  isCraftOnly?: boolean; // クラフト限定アイテム（ショップやドロップ対象外）
 }
 
 export interface MonsterDrop {
@@ -66,7 +65,6 @@ export interface PlayerStats {
   job?: JobType;          // 特化職 (デフォルト: balanced)
   lastJobChangeLevel?: number; // 最後に転職の機会を行使/確認したレベル (貯められない)
   hasCurseImmunity?: boolean; // 呪い封じの護符による一時的な呪い無効化バフ
-  creditScore?: number; // 信用スコア (初期値 100)
 }
 
 export interface EquipmentState {
@@ -89,7 +87,6 @@ export interface PlayerItem {
   isUncursed?: boolean;
   unlockedSockets?: number; // 解放済みの穴の数
   slottedGems?: string[];   // はめ込まれた宝石のbaseIdリスト
-  engraving?: string;
 }
 
 export interface SaveData {

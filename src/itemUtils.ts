@@ -50,7 +50,7 @@ export const getCompiledItem = (playerItem: PlayerItem | undefined, ignoreCurses
   }
 
   // Effect merging
-  let effect: ItemEffect | undefined = baseEffect ? { ...baseEffect } : undefined;
+  let effect: ItemEffect | undefined = baseEffect;
   if (playerItem.addedEffect) {
     const descParts = [baseEffect?.description].filter(Boolean);
     if (playerItem.addedEffect.description) {
@@ -97,14 +97,9 @@ export const getCompiledItem = (playerItem: PlayerItem | undefined, ignoreCurses
         if (gem.effect) {
           effect!.description += `\n[${gem.name}] ${gem.effect.description}`;
           if (gem.effect.elementalDamage) effect!.elementalDamage = (effect!.elementalDamage || 0) + gem.effect.elementalDamage;
-          if (gem.effect.elementalType) effect!.elementalType = gem.effect.elementalType;
+          if (gem.effect.elementalType) effect!.elementalType = gem.effect.elementalType; // Overwrite for simplicity or maybe stack? Overwrite is fine.
           if (gem.effect.critChance) effect!.critChance = (effect!.critChance || 0) + gem.effect.critChance;
           if (gem.effect.hpRegen) effect!.hpRegen = (effect!.hpRegen || 0) + gem.effect.hpRegen;
-          if (gem.effect.goldBonus) effect!.goldBonus = (effect!.goldBonus || 0) + gem.effect.goldBonus;
-          if (gem.effect.xpBonus) effect!.xpBonus = (effect!.xpBonus || 0) + gem.effect.xpBonus;
-          if (gem.effect.maxHpBonus) effect!.maxHpBonus = (effect!.maxHpBonus || 0) + gem.effect.maxHpBonus;
-          if (gem.effect.damageMultiplier) effect!.damageMultiplier = (effect!.damageMultiplier || 0) + gem.effect.damageMultiplier;
-          if (gem.effect.lifesteal) effect!.lifesteal = (effect!.lifesteal || 0) + gem.effect.lifesteal;
         }
       }
     });
@@ -124,11 +119,7 @@ export const calculateSellPrice = (playerItem: PlayerItem, job: JobType = 'balan
   const baseItem = ITEMS[playerItem.baseId];
   if (!baseItem) return 10;
 
-  const basePrice = baseItem.price || (
-    baseItem.type === 'material' ? 50 :
-    baseItem.type === 'gem' ? 800 :
-    baseItem.type === 'chest' ? 200 : 100
-  );
+  const basePrice = baseItem.price || 100;
   // 基本は定価の半額 (50%)
   let sellPrice = Math.floor(basePrice * 0.5);
 
@@ -153,7 +144,7 @@ export const calculateSellPrice = (playerItem: PlayerItem, job: JobType = 'balan
   }
 
   const jobMult = getSellGoldMultiplier(job);
-  return Math.max(5, Math.floor(sellPrice * jobMult));
+  return Math.max(10, Math.floor(sellPrice * jobMult));
 };
 
 export const calculateUncurseCost = (playerItem: PlayerItem, job: JobType = 'balanced'): number => {
@@ -177,111 +168,5 @@ export const calculateUncurseCost = (playerItem: PlayerItem, job: JobType = 'bal
   cost = Math.max(5000000, cost);
   const discountMult = getUncurseDiscountMultiplier(job);
   return Math.floor(cost * discountMult);
-};
-
-// --- まとめ強化用ヘルパー ---
-
-// 指定回数(+N)強化時の合計費用を算出
-export const calculateBatchEnchantCost = (currentLevel: number, count: number): number => {
-  let totalCost = 0;
-  for (let i = 0; i < count; i++) {
-    totalCost += 200 + (currentLevel + i) * 100;
-  }
-  return totalCost;
-};
-
-// 所持ゴールドで可能な最大強化回数と合計費用を算出
-export const calculateMaxEnchantLevels = (currentLevel: number, availableGold: number): { maxLevels: number; totalCost: number } => {
-  let levels = 0;
-  let totalCost = 0;
-  let nextCost = 200 + (currentLevel + levels) * 100;
-  while (availableGold >= totalCost + nextCost) {
-    totalCost += nextCost;
-    levels++;
-    nextCost = 200 + (currentLevel + levels) * 100;
-  }
-  return { maxLevels: levels, totalCost };
-};
-
-// まとめ基本強化を実行し、更新後アイテムと消費ゴールドを返却
-export const performBatchEnchant = (pItem: PlayerItem, count: number): { updatedItem: PlayerItem; totalCost: number } => {
-  const cost = calculateBatchEnchantCost(pItem.upgradeLevel, count);
-  let newLevel = pItem.upgradeLevel;
-  let addedPower = pItem.addedPower;
-  let customPrefix = pItem.customPrefix;
-  const prefixes = ['鋭利な', '炎の', '伝説の', '祝福された', '呪われた', '名工の', '神聖なる'];
-
-  for (let i = 0; i < count; i++) {
-    newLevel++;
-    addedPower += Math.floor(Math.random() * 3) + 1;
-    if (newLevel % 3 === 0) {
-      customPrefix = prefixes[Math.floor(Math.random() * prefixes.length)];
-    }
-  }
-
-  return {
-    updatedItem: {
-      ...pItem,
-      upgradeLevel: newLevel,
-      addedPower,
-      customPrefix,
-    },
-    totalCost: cost,
-  };
-};
-
-// まとめ特殊強化（素材複数消費）を実行
-export const performBatchSpecialEnchant = (
-  pItem: PlayerItem,
-  materialBaseId: string,
-  count: number
-): PlayerItem => {
-  let addedPower = pItem.addedPower;
-  const prevEffect: ItemEffect = pItem.addedEffect || { description: '' };
-  const matEffect: ItemEffect = { ...prevEffect };
-  let prefix = prevEffect.description ? 'キメラの' : '神秘の';
-
-  for (let i = 0; i < count; i++) {
-    addedPower += Math.floor(Math.random() * 5) + 3; // +3~7 power
-    if (materialBaseId === 'm_slime_jelly') {
-      prefix = prevEffect.description ? 'キメラの' : '粘性の';
-      matEffect.enemySlowRate = Math.min(0.90, (matEffect.enemySlowRate || 0) + 0.15);
-    } else if (materialBaseId === 'm_goblin_ear') {
-      prefix = prevEffect.description ? 'キメラの' : '野蛮な';
-      matEffect.critChance = Math.min(1.0, (matEffect.critChance || 0) + 0.05);
-    } else if (materialBaseId === 'm_orc_fang') {
-      prefix = prevEffect.description ? 'キメラの' : '豪傑の';
-      matEffect.lifesteal = Math.min(1.0, (matEffect.lifesteal || 0) + 0.03);
-    } else if (materialBaseId === 'm_demon_horn') {
-      prefix = prevEffect.description ? 'キメラの' : '魔性の';
-      matEffect.hpRegen = (matEffect.hpRegen || 0) + 2;
-      matEffect.damageMultiplier = (matEffect.damageMultiplier || 0) + 0.05;
-    } else if (materialBaseId === 'm_dragon_scale') {
-      prefix = prevEffect.description ? 'キメラの' : '覇竜の';
-      matEffect.maxHpBonus = (matEffect.maxHpBonus || 0) + 30;
-      matEffect.goldBonus = (matEffect.goldBonus || 0) + 0.10;
-    }
-  }
-
-  // Build new description dynamically
-  const descParts = [];
-  if (matEffect.enemySlowRate) descParts.push(`遅延${Math.round(matEffect.enemySlowRate * 100)}%`);
-  if (matEffect.critChance) descParts.push(`会心+${Math.round(matEffect.critChance * 100)}%`);
-  if (matEffect.lifesteal) descParts.push(`吸血+${Math.round(matEffect.lifesteal * 100)}%`);
-  if (matEffect.hpRegen || matEffect.damageMultiplier) {
-    descParts.push(`毎秒HP+${matEffect.hpRegen || 0}/ダメ+${Math.round((matEffect.damageMultiplier || 0) * 100)}%`);
-  }
-  if (matEffect.maxHpBonus || matEffect.goldBonus) {
-    descParts.push(`HP+${matEffect.maxHpBonus || 0}/金+${Math.round((matEffect.goldBonus || 0) * 100)}%`);
-  }
-  matEffect.description = descParts.join(' | ') || '特殊強化済';
-
-  return {
-    ...pItem,
-    addedPower,
-    specialEnchantCount: (pItem.specialEnchantCount || 0) + count,
-    customPrefix: prefix,
-    addedEffect: matEffect,
-  };
 };
 

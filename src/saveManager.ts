@@ -59,32 +59,16 @@ export function sanitizeSaveData(rawData: any): SaveData {
       if (item && typeof item === 'object') {
         const baseId = item.baseId || item.id || 'w_wood_sword';
         const validBaseId = ITEMS[baseId] ? baseId : 'w_wood_sword';
-
-        let slottedGems: string[] | undefined = undefined;
-        if (Array.isArray(item.slottedGems)) {
-          const validGems = item.slottedGems.filter((g: any) => typeof g === 'string' && ITEMS[g] && ITEMS[g].type === 'gem');
-          if (validGems.length > 0) {
-            slottedGems = validGems;
-          }
-        }
-
-        const cleanItem: PlayerItem = {
+        return {
           uid: item.uid ? String(item.uid) : generateUid(),
           baseId: validBaseId,
-          upgradeLevel: typeof item.upgradeLevel === 'number' ? Math.max(0, item.upgradeLevel) : 0,
-          limitBreak: typeof item.limitBreak === 'number' ? Math.max(0, item.limitBreak) : 0,
+          upgradeLevel: typeof item.upgradeLevel === 'number' ? item.upgradeLevel : 0,
+          limitBreak: typeof item.limitBreak === 'number' ? item.limitBreak : 0,
           addedPower: typeof item.addedPower === 'number' ? item.addedPower : 0,
-          specialEnchantCount: typeof item.specialEnchantCount === 'number' ? Math.max(0, item.specialEnchantCount) : 0,
-          customPrefix: typeof item.customPrefix === 'string' && item.customPrefix.trim() ? item.customPrefix.trim() : undefined,
+          specialEnchantCount: typeof item.specialEnchantCount === 'number' ? item.specialEnchantCount : 0,
+          customPrefix: typeof item.customPrefix === 'string' ? item.customPrefix : undefined,
           addedEffect: item.addedEffect,
-          isLocked: Boolean(item.isLocked),
-          isUncursed: Boolean(item.isUncursed),
-          unlockedSockets: typeof item.unlockedSockets === 'number' ? Math.max(0, Math.min(3, item.unlockedSockets)) : 0,
-          slottedGems: slottedGems,
-          engraving: typeof item.engraving === 'string' && item.engraving.trim() ? item.engraving.trim() : undefined,
         };
-
-        return cleanItem;
       }
       return {
         uid: generateUid(),
@@ -181,7 +165,6 @@ export function sanitizeSaveData(rawData: any): SaveData {
     ? Math.min(rawStats.hp, maxHp)
     : maxHp;
 
-  const validJobs = ['merchant', 'miner', 'appraiser', 'warrior', 'balanced', 'artisan'];
   const stats: PlayerStats = {
     level,
     xp: typeof rawStats.xp === 'number' && rawStats.xp >= 0 ? rawStats.xp : 0,
@@ -192,10 +175,8 @@ export function sanitizeSaveData(rawData: any): SaveData {
     maxStageReached: typeof rawStats.maxStageReached === 'number' && rawStats.maxStageReached > 0
       ? rawStats.maxStageReached
       : (typeof rawStats.stage === 'number' && rawStats.stage > 0 ? rawStats.stage : 1),
-    job: (validJobs.includes(rawStats.job) ? rawStats.job : 'balanced'),
+    job: (['merchant', 'miner', 'appraiser', 'warrior', 'balanced'].includes(rawStats.job) ? rawStats.job : 'balanced'),
     lastJobChangeLevel: typeof rawStats.lastJobChangeLevel === 'number' ? rawStats.lastJobChangeLevel : undefined,
-    hasCurseImmunity: Boolean(rawStats.hasCurseImmunity),
-    creditScore: typeof rawStats.creditScore === 'number' ? rawStats.creditScore : 100,
   };
 
   return {

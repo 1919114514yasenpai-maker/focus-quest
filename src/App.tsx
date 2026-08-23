@@ -5,8 +5,6 @@ import { Settings } from './components/Settings';
 import { ChestModal } from './components/ChestModal';
 import { StageSelectModal } from './components/StageSelectModal';
 import { JobSelectModal } from './components/JobSelectModal';
-import { GuildRanking } from './components/GuildRanking';
-import { AuctionHouse } from './components/AuctionHouse';
 import { PlayerStats, EquipmentState, SaveData, Monster, PlayerItem, ChestReward, JobType } from './types';
 import { INITIAL_INVENTORY, ITEMS, getNextLevelXp, getMonsterForStage, generateUid } from './gameData';
 import { getCompiledItem } from './itemUtils';
@@ -23,8 +21,6 @@ import {
   getNextJobChangeLevel
 } from './jobUtils';
 import { useCloudSave } from './useCloudSave';
-import { db, auth } from './firebase';
-import { doc, getDoc, updateDoc, setDoc, increment } from 'firebase/firestore';
 
 import { DailyShopItem } from './dailyShopUtils';
 
@@ -45,10 +41,6 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showStageSelect, setShowStageSelect] = useState(false);
   const [showJobModal, setShowJobModal] = useState(false);
-  const [showGuildRanking, setShowGuildRanking] = useState(false);
-  const [showAuctionHouse, setShowAuctionHouse] = useState(false);
-  const [authPromptFeature, setAuthPromptFeature] = useState<'guild' | 'auction' | null>(null);
-  const [myGuildName, setMyGuildName] = useState<string | undefined>();
   const [isJobMilestoneTrigger, setIsJobMilestoneTrigger] = useState(false);
 
   const [pendingChestReward, setPendingChestReward] = useState<ChestReward | null>(null);
@@ -263,62 +255,6 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
-  const updateWeeklyFocusTime = async (minutes: number) => {
-    if (!auth.currentUser) return;
-    const currentWeekId = `2026-W${Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000))}`;
-    try {
-      const userRef = doc(db, "users", auth.currentUser.uid);
-      const userSnap = await getDoc(userRef);
-      if (userSnap.exists()) {
-        const data = userSnap.data();
-        if (data.weekId !== currentWeekId) {
-          await updateDoc(userRef, {
-            weekId: currentWeekId,
-            weeklyFocusTime: minutes,
-            totalFocusTime: increment(minutes)
-          });
-          if (data.guildId) {
-            const guildRef = doc(db, "guilds", data.guildId);
-            const guildSnap = await getDoc(guildRef);
-            if (guildSnap.exists()) {
-              if (guildSnap.data().weekId !== currentWeekId) {
-                await updateDoc(guildRef, { weekId: currentWeekId, weeklyFocusTime: minutes });
-              } else {
-                await updateDoc(guildRef, { weeklyFocusTime: increment(minutes) });
-              }
-            }
-          }
-        } else {
-          await updateDoc(userRef, { 
-            weeklyFocusTime: increment(minutes),
-            totalFocusTime: increment(minutes)
-          });
-          if (data.guildId) {
-            const guildRef = doc(db, "guilds", data.guildId);
-            const guildSnap = await getDoc(guildRef);
-            if (guildSnap.exists()) {
-              if (guildSnap.data().weekId !== currentWeekId) {
-                await updateDoc(guildRef, { weekId: currentWeekId, weeklyFocusTime: minutes });
-              } else {
-                await updateDoc(guildRef, { weeklyFocusTime: increment(minutes) });
-              }
-            }
-          }
-        }
-      } else {
-        await setDoc(userRef, {
-          displayName: auth.currentUser.displayName || "名無し勇者",
-          weeklyFocusTime: minutes,
-          totalFocusTime: minutes,
-          weekId: currentWeekId,
-          guildId: ""
-        });
-      }
-    } catch (e) {
-      console.error("Failed to update weekly focus time", e);
-    }
-  };
-
   const handleTimerComplete = () => {
     if (timerMode === 'focus') {
       const chestId = getChestForFocusMinutes(focusMinutes);
@@ -331,7 +267,6 @@ export default function App() {
       };
 
       setInventory(prev => [...prev, newChestItem]);
-      updateWeeklyFocusTime(focusMinutes);
       showToast(`🎁 集中達成！「${chestItem?.name || '宝箱'}」を素材欄に獲得しました！（素材欄からいつでも開封できます）`);
 
       setStats(prev => ({ ...prev, hp: prev.maxHp }));
@@ -360,25 +295,13 @@ export default function App() {
     setPendingChestFocusMins(undefined);
   };
 
-  const addXpAndGold = React.useCallback((gainedXp: number, gainedGold: number) => {
-    const currentWeapon = getCompiledItem(
-      inventory.find(i => i.uid === equipment.statWeaponId),
-      stats.hasCurseImmunity
-    );
-    const currentArmor = getCompiledItem(
-      inventory.find(i => i.uid === equipment.statArmorId),
-      stats.hasCurseImmunity
-    );
-
+  const addXpAndGold = (gainedXp: number, gainedGold: number) => {
     const currentJob = stats.job || 'balanced';
-    const creditScore = stats.creditScore || 100;
-    const creditScoreBonus = creditScore >= 120 ? 0.1 : creditScore < 80 ? -0.1 : 0;
-    
-    const xpMult = Math.max(0.1, 1 + (currentWeapon?.effect?.xpBonus || 0) + (currentArmor?.effect?.xpBonus || 0) + getXpBonusMultiplier(currentJob) + creditScoreBonus);
-    const goldMult = Math.max(0.1, 1 + (currentWeapon?.effect?.goldBonus || 0) + (currentArmor?.effect?.goldBonus || 0) + getGoldBonusMultiplier(currentJob) + creditScoreBonus);
+    const xpMult = 1 + (statWeaponItem?.effect?.xpBonus || 0) + (statArmorItem?.effect?.xpBonus || 0) + getXpBonusMultiplier(currentJob);
+    const goldMult = 1 + (statWeaponItem?.effect?.goldBonus || 0) + (statArmorItem?.effect?.goldBonus || 0) + getGoldBonusMultiplier(currentJob);
 
-    const finalXp = Math.max(1, Math.floor(gainedXp * xpMult));
-    const finalGold = Math.max(1, Math.floor(gainedGold * goldMult));
+    const finalXp = Math.floor(gainedXp * xpMult);
+    const finalGold = Math.floor(gainedGold * goldMult);
 
     let reachedMilestoneLevel = 0;
 
@@ -413,18 +336,18 @@ export default function App() {
         showToast(`⚡ 祝・Lv.${reachedMilestoneLevel}到達！ 転職の儀式が発動しました！`);
       }
     }
-  }, [inventory, equipment.statWeaponId, equipment.statArmorId, stats.job, stats.creditScore, stats.hasCurseImmunity]);
+  };
 
-  const handleAttackMonster = React.useCallback((damage: number, isCrit: boolean, lifestealHeal: number) => {
+  const handleAttackMonster = (damage: number, isCrit: boolean, lifestealHeal: number) => {
     if (lifestealHeal > 0) {
       setStats(prev => ({
         ...prev,
         hp: Math.min(prev.maxHp, prev.hp + lifestealHeal),
       }));
     }
-  }, []);
+  };
 
-  const handleMonsterDefeated = React.useCallback((defeatedMonster: Monster) => {
+  const handleMonsterDefeated = (defeatedMonster: Monster) => {
     addXpAndGold(defeatedMonster.xpReward, defeatedMonster.goldReward);
     
     // Process drops
@@ -438,7 +361,12 @@ export default function App() {
             limitBreak: 0,
             addedPower: 0,
           };
-          setInventory(prev => [...prev, newItem]);
+          setInventory(prev => {
+            // Check if material already exists to stack them? Currently items don't stack but materials should be stackable or just added as separate items.
+            // Let's add them as separate items for now, or maybe stack? The inventory UI might need to group materials.
+            return [...prev, newItem];
+          });
+          // Show a toast or small alert? Maybe too annoying. Let's just silently add.
         }
       });
     }
@@ -453,9 +381,9 @@ export default function App() {
         maxStageReached: nextMaxStage,
       };
     });
-  }, [addXpAndGold]);
+  };
 
-  const handlePlayerTakeDamage = React.useCallback((damage: number) => {
+  const handlePlayerTakeDamage = (damage: number) => {
     setStats(prev => {
       const nextHp = prev.hp - damage;
       if (nextHp <= 0) {
@@ -470,7 +398,7 @@ export default function App() {
       }
       return { ...prev, hp: nextHp };
     });
-  }, []);
+  };
 
   const handleBuyItem = (baseId: string, price: number) => {
     if (stats.gold < price) return;
@@ -573,67 +501,6 @@ export default function App() {
     showToast(`💰 「${baseItem?.name || '装備'}」を売却し、🪙 ${sellPrice} G を獲得しました。`);
   };
 
-  const handleBatchSellItems = (uids: string[], totalSellPrice: number) => {
-    if (!uids.length) return;
-    const validItems = inventory.filter(i => 
-      uids.includes(i.uid) && 
-      !i.isLocked && 
-      equipment.statWeaponId !== i.uid && 
-      equipment.statArmorId !== i.uid
-    );
-    if (!validItems.length) {
-      showToast('⚠️ 売却可能なアイテムが選択されていません。');
-      return;
-    }
-    const validUids = new Set(validItems.map(i => i.uid));
-    setStats(prev => ({ ...prev, gold: prev.gold + totalSellPrice }));
-    setInventory(prev => prev.filter(i => !validUids.has(i.uid)));
-    showToast(`💰 アイテム ${validItems.length} 個を一括売却し、🪙 ${totalSellPrice.toLocaleString()} G を獲得しました！`);
-  };
-
-  const handleBatchBuyItem = (baseId: string, quantity: number, unitPrice: number) => {
-    if (quantity <= 0) return;
-    const totalCost = quantity * unitPrice;
-    if (stats.gold < totalCost) {
-      showToast(`⚠️ ゴールドが足りません。(必要: 🪙 ${totalCost.toLocaleString()} G)`);
-      return;
-    }
-    setStats(prev => ({ ...prev, gold: prev.gold - totalCost }));
-    const newItems: PlayerItem[] = Array.from({ length: quantity }, () => ({
-      uid: generateUid(),
-      baseId,
-      upgradeLevel: 0,
-      limitBreak: 0,
-      addedPower: 0,
-    }));
-    setInventory(prev => [...prev, ...newItems]);
-    showToast(`🏪 「${ITEMS[baseId]?.name || 'アイテム'}」を ${quantity} 個まとめ買いしました！(消費: 🪙 ${totalCost.toLocaleString()} G)`);
-  };
-
-  const handleBatchBuyDailyItems = (dailyItemsToBuy: DailyShopItem[]) => {
-    const availableItems = dailyItemsToBuy.filter(d => !soldOutDailyItems.includes(d.shopItemId));
-    if (!availableItems.length) return;
-
-    const totalCost = availableItems.reduce((sum, item) => sum + item.price, 0);
-    if (stats.gold < totalCost) {
-      showToast(`⚠️ ゴールドが足りません。(必要: 🪙 ${totalCost.toLocaleString()} G)`);
-      return;
-    }
-
-    setStats(prev => ({ ...prev, gold: prev.gold - totalCost }));
-    const newItems: PlayerItem[] = availableItems.map(dailyItem => ({
-      uid: generateUid(),
-      baseId: dailyItem.baseId,
-      upgradeLevel: dailyItem.upgradeLevel,
-      limitBreak: 0,
-      addedPower: dailyItem.addedPower,
-      customPrefix: dailyItem.customPrefix,
-    }));
-    setInventory(prev => [...prev, ...newItems]);
-    setSoldOutDailyItems(prev => [...prev, ...availableItems.map(i => i.shopItemId)]);
-    showToast(`📅 日替わりアイテム ${availableItems.length} 品をまとめて全品購入しました！`);
-  };
-
   const handleUncurseItem = (uid: string, cost: number) => {
     const item = inventory.find(i => i.uid === uid);
     if (!item) return;
@@ -649,8 +516,6 @@ export default function App() {
 
   const handleCraftItem = (targetBaseId: string) => {
     let requiredMaterials: { id: string, count: number }[] = [];
-    let extraProps: Partial<PlayerItem> = {};
-    let targetBaseIdToCraft = targetBaseId;
 
     if (targetBaseId === 'c_curse_breaker') {
       const requiredCount = stats.job === 'artisan' ? 8 : 10;
@@ -662,16 +527,6 @@ export default function App() {
         ...['m_slime_jelly', 'm_goblin_ear', 'm_orc_fang', 'm_demon_horn', 'm_dragon_scale'].map(id => ({ id, count: matCount })),
         ...['g_fire_ruby', 'g_water_sapphire', 'g_thunder_topaz', 'g_light_diamond', 'g_dark_onyx'].map(id => ({ id, count: gemCount }))
       ];
-    } else if (targetBaseId === 'w_deep_sword' || targetBaseId === 'a_deep_armor') {
-      const crystalCount = stats.job === 'artisan' ? 8 : 10;
-      const coreCount = stats.job === 'artisan' ? 1 : 2;
-      requiredMaterials = [
-        { id: 'm_deep_crystal', count: crystalCount },
-        { id: 'm_abyss_core', count: coreCount }
-      ];
-      const deepBonus = Math.floor(stats.maxStageReached * 1.5);
-      extraProps.addedPower = deepBonus;
-      extraProps.engraving = auth.currentUser?.displayName || '名無し勇者';
     } else {
       return; // Unknown recipe
     }
@@ -702,10 +557,10 @@ export default function App() {
       });
       return [
         ...nextInv,
-        { uid: generateUid(), baseId: targetBaseIdToCraft, upgradeLevel: 0, addedPower: 0, ...extraProps }
+        { uid: generateUid(), baseId: targetBaseId, upgradeLevel: 0, addedPower: 0 }
       ];
     });
-    showToast(`✨ 「${ITEMS[targetBaseIdToCraft].name}」をクラフトしました！`);
+    showToast(`✨ 「${ITEMS[targetBaseId].name}」をクラフトしました！`);
   };
 
   const handleUseConsumable = (uid: string) => {
@@ -784,11 +639,6 @@ export default function App() {
     }
   };
 
-  const handleEngraveItem = (uid: string, guildName: string) => {
-    setInventory(prev => prev.map(item => item.uid === uid ? { ...item, engraving: guildName } : item));
-    showToast('✨ ギルド名を刻印しました！');
-  };
-
   const handleInsertGem = (weaponUid: string, gemUid: string) => {
     const weapon = inventory.find(i => i.uid === weaponUid);
     const gem = inventory.find(i => i.uid === gemUid);
@@ -842,37 +692,6 @@ export default function App() {
     }
   };
 
-  const handleBatchLimitBreak = (targetUid: string, consumedUids: string[]) => {
-    if (!consumedUids.length) return;
-    const currentJob = stats.job || 'balanced';
-    const bonusPerCopy = getAppraiserPowerBonus(currentJob);
-    const totalBonus = bonusPerCopy * consumedUids.length;
-
-    setInventory(prev => {
-      const targetItem = prev.find(i => i.uid === targetUid);
-      if (!targetItem) return prev;
-
-      setEquipment(eq => {
-        const nextEq = { ...eq };
-        consumedUids.forEach(uid => {
-          if (nextEq.statWeaponId === uid) nextEq.statWeaponId = targetUid;
-          if (nextEq.statArmorId === uid) nextEq.statArmorId = targetUid;
-        });
-        return nextEq;
-      });
-
-      const consumedSet = new Set(consumedUids);
-      const newInventory = prev.filter(i => !consumedSet.has(i.uid));
-      return newInventory.map(i => i.uid === targetUid ? {
-        ...i,
-        limitBreak: (i.limitBreak || 0) + consumedUids.length,
-        addedPower: (i.addedPower || 0) + totalBonus,
-      } : i);
-    });
-
-    showToast(`🔨 同名装備 ${consumedUids.length} 個を一括合体し、限界突破 +${consumedUids.length} 凸に強化しました！${totalBonus > 0 ? ` (鑑定士特化ボーナス +${totalBonus})` : ''}`);
-  };
-
   const handleSpecialEnchant = (uid: string, materialUid: string, cost: number, newEffect: PlayerItem) => {
     if (stats.gold < cost) return;
     setStats(prev => ({ ...prev, gold: prev.gold - cost }));
@@ -883,18 +702,6 @@ export default function App() {
       // Update item
       return filtered.map(i => i.uid === uid ? { ...i, ...newEffect } : i);
     });
-  };
-
-  const handleBatchSpecialEnchant = (uid: string, consumedMaterialUids: string[], cost: number, newEffect: PlayerItem) => {
-    if (stats.gold < cost) return;
-    setStats(prev => ({ ...prev, gold: prev.gold - cost }));
-
-    const consumedSet = new Set(consumedMaterialUids);
-    setInventory(prev => {
-      const filtered = prev.filter(i => !consumedSet.has(i.uid));
-      return filtered.map(i => i.uid === uid ? { ...i, ...newEffect } : i);
-    });
-    showToast(`✨ 特殊強化を素材 ${consumedMaterialUids.length} 個分まとめて実行しました！`);
   };
 
   const handleEnchantItem = (uid: string, cost: number, newEffect: PlayerItem) => {
@@ -968,18 +775,13 @@ export default function App() {
   const hpPercent = Math.min(100, Math.max(0, (stats.hp / stats.maxHp) * 100));
 
   const activeEffects: string[] = [];
-  const jobGoldBonus = getGoldBonusMultiplier(stats.job || 'balanced');
-  const jobXpBonus = getXpBonusMultiplier(stats.job || 'balanced');
-  const creditScore = stats.creditScore || 100;
-  const creditScoreBonus = creditScore >= 120 ? 0.1 : creditScore < 80 ? -0.1 : 0;
-
-  const totalGoldBonus = (statWeaponItem?.effect?.goldBonus || 0) + (statArmorItem?.effect?.goldBonus || 0) + jobGoldBonus + creditScoreBonus;
-  const totalXpBonus = (statWeaponItem?.effect?.xpBonus || 0) + (statArmorItem?.effect?.xpBonus || 0) + jobXpBonus + creditScoreBonus;
+  const totalGoldBonus = (statWeaponItem?.effect?.goldBonus || 0) + (statArmorItem?.effect?.goldBonus || 0);
+  const totalXpBonus = (statWeaponItem?.effect?.xpBonus || 0) + (statArmorItem?.effect?.xpBonus || 0);
 
   if (stats.hasCurseImmunity) activeEffects.push(`📜 呪い無効化 (次回の解呪まで)`);
   if (statWeaponItem?.effect?.critChance) activeEffects.push(`会心率 +${Math.floor(statWeaponItem.effect.critChance * 100)}%`);
-  if (totalGoldBonus !== 0) activeEffects.push(`獲得G ${totalGoldBonus > 0 ? '+' : ''}${Math.round(totalGoldBonus * 100)}%`);
-  if (totalXpBonus !== 0) activeEffects.push(`獲得EXP ${totalXpBonus > 0 ? '+' : ''}${Math.round(totalXpBonus * 100)}%`);
+  if (totalGoldBonus > 0) activeEffects.push(`獲得G +${Math.floor(totalGoldBonus * 100)}%`);
+  if (totalXpBonus > 0) activeEffects.push(`獲得EXP +${Math.floor(totalXpBonus * 100)}%`);
   if (statWeaponItem?.effect?.lifesteal) activeEffects.push(`攻撃吸血 +${Math.floor(statWeaponItem.effect.lifesteal * 100)}%`);
   const currentHpRegen = statArmorItem?.effect?.hpRegen || 1;
   activeEffects.push(`毎秒HP回復 +${currentHpRegen}`);
@@ -1030,17 +832,36 @@ export default function App() {
       </div>
 
       <div className="relative z-10 w-full p-2 sm:p-4 flex flex-wrap justify-between items-start pointer-events-none gap-2">
-        <div className="pixel-panel w-full sm:w-72 max-w-full pointer-events-auto bg-slate-900/90 border-slate-700 p-2 sm:p-3">
-          <div className="flex justify-between items-center mb-1.5 gap-1">
-            <div className="flex items-center gap-1.5">
+        <div className="pixel-panel w-64 sm:w-72 pointer-events-auto bg-slate-900/90 border-slate-700 p-2 sm:p-3">
+          <div className="flex justify-between items-center mb-1 gap-1">
+            <div className="flex items-center gap-1">
               <span className="text-xs sm:text-sm text-amber-300 font-bold">勇者 Lv.{stats.level}</span>
-              <span className="text-[10px] sm:text-xs text-indigo-300 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-700/60 font-medium">
-                {currentJobDef.icon} {currentJobDef.name}
-              </span>
+              {(() => {
+                const unlocked = isJobUnlocked(stats.level);
+                const canChange = canChangeJobNow(stats.level, stats.lastJobChangeLevel);
+                return (
+                  <button
+                    onClick={() => {
+                      setIsJobMilestoneTrigger(canChange);
+                      setShowJobModal(true);
+                    }}
+                    className={`pixel-btn text-[9px] !py-0.5 !px-1.5 flex items-center gap-1 ${
+                      canChange
+                        ? '!bg-amber-600 !text-white !border-amber-400 animate-bounce'
+                        : '!bg-indigo-950 !text-indigo-300 !border-indigo-600 hover:!bg-indigo-900'
+                    }`}
+                    title={unlocked ? "特化職神殿" : "特化職 (Lv.100で解禁)"}
+                  >
+                    <span>{currentJobDef.icon} {currentJobDef.name}</span>
+                    {canChange && <span className="text-[8px] bg-amber-400 text-slate-950 font-bold px-1 rounded">転職可!</span>}
+                    {!unlocked && <span className="text-[8px] bg-slate-800 text-slate-400 px-1 rounded border border-slate-700">Lv.100解禁</span>}
+                  </button>
+                );
+              })()}
             </div>
             <button
               onClick={() => setShowStageSelect(true)}
-              className="pixel-btn text-[10px] !py-0.5 !px-2 active !border-sky-400 !text-sky-300 hover:!bg-sky-950 flex items-center gap-1"
+              className="pixel-btn text-[10px] !py-0.5 !px-1.5 active !border-sky-400 !text-sky-300 hover:!bg-sky-950 flex items-center gap-1"
               title="一度到達した階層に移動"
             >
               <span>地下 {stats.stage} 階</span>
@@ -1085,7 +906,7 @@ export default function App() {
           )}
         </div>
 
-        <div className="pixel-panel text-center pointer-events-auto min-w-[160px] sm:min-w-[180px] bg-slate-900/90 border-slate-700 flex flex-col items-center p-2 sm:p-3 mx-auto sm:mx-0">
+        <div className="pixel-panel text-center pointer-events-auto min-w-[160px] sm:min-w-[180px] bg-slate-900/90 border-slate-700 flex flex-col items-center p-2 sm:p-3">
           <div className="text-[11px] sm:text-xs text-slate-400 mb-0.5">
             {timerMode === 'idle' ? '待機中' : timerMode === 'focus' ? '⚔️ 集中クエスト中' : '☕ 休憩中'}
           </div>
@@ -1128,120 +949,64 @@ export default function App() {
         </div>
       </div>
 
-      <div className="mt-auto relative z-10 p-2 sm:p-3 pb-3 flex flex-col items-center gap-2 pointer-events-auto w-full max-w-md mx-auto">
-        {/* Main Quest Action */}
-        <div className="w-full">
-          {timerMode === 'idle' ? (
-            <button
-              onClick={handleStartFocus}
-              className="pixel-btn active text-xs sm:text-sm w-full py-2.5 sm:py-3 shadow-lg flex items-center justify-center gap-2 font-bold"
-            >
-              <span>⚔️</span> 集中クエスト開始 ({focusMinutes}分)
+      <div className="mt-auto relative z-10 p-2 sm:p-4 pb-3 sm:pb-5 flex flex-wrap justify-center items-center gap-2 sm:gap-3 pointer-events-auto max-w-full">
+        {timerMode === 'idle' ? (
+          <button onClick={handleStartFocus} className="pixel-btn active text-xs sm:text-sm px-4 sm:px-6 py-2 sm:py-2.5">
+            ⚔️ 集中クエスト開始 ({focusMinutes}分)
+          </button>
+        ) : timerMode === 'focus' ? (
+          <button onClick={handleStop} className="pixel-btn !border-rose-600 !text-rose-300 hover:!bg-rose-950/60 text-xs sm:text-sm px-4 sm:px-6 py-2 sm:py-2.5">
+            🏃 撤退する
+          </button>
+        ) : (
+          <>
+            <button onClick={handleStartFocus} className="pixel-btn active text-xs sm:text-sm px-4 sm:px-6 py-2 sm:py-2.5">
+              ⚔️ 次の集中へ進む
             </button>
-          ) : timerMode === 'focus' ? (
-            <button
-              onClick={handleStop}
-              className="pixel-btn !border-rose-600 !text-rose-300 hover:!bg-rose-950/60 text-xs sm:text-sm w-full py-2.5 sm:py-3 font-bold"
-            >
-              🏃 撤退する
+            <button onClick={handleStop} className="pixel-btn opacity-80 text-xs sm:text-sm px-4 sm:px-6 py-2 sm:py-2.5">
+              終了する
             </button>
-          ) : (
-            <div className="flex gap-2 w-full">
-              <button
-                onClick={handleStartFocus}
-                className="pixel-btn active text-xs sm:text-sm flex-1 py-2.5 font-bold"
-              >
-                ⚔️ 次の集中へ進む
-              </button>
-              <button
-                onClick={handleStop}
-                className="pixel-btn opacity-80 text-xs sm:text-sm px-4 py-2.5"
-              >
-                終了する
-              </button>
-            </div>
+          </>
+        )}
+
+        {(() => {
+          const unlocked = isJobUnlocked(stats.level);
+          const canChange = canChangeJobNow(stats.level, stats.lastJobChangeLevel);
+          return (
+            <button
+              onClick={() => {
+                setIsJobMilestoneTrigger(canChange);
+                setShowJobModal(true);
+              }}
+              className={`pixel-btn text-xs sm:text-sm px-3 sm:px-5 py-2 sm:py-2.5 flex items-center gap-1.5 ${
+                canChange
+                  ? '!bg-amber-600 !border-amber-400 !text-white hover:!bg-amber-500 animate-pulse'
+                  : '!bg-indigo-950/90 !border-indigo-500 !text-indigo-200 hover:!bg-indigo-900'
+              }`}
+            >
+              <span>🏛️ {currentJobDef.icon} 特化職</span>
+              {canChange && <span className="text-[10px] bg-amber-400 text-slate-950 font-bold px-1.5 py-0.2 rounded">転職可!</span>}
+              {!unlocked && <span className="text-[10px] bg-slate-900 text-slate-400 px-1 rounded border border-slate-700">Lv.100解禁</span>}
+            </button>
+          );
+        })()}
+
+        <button onClick={() => setShowInventory(!showInventory)} className="pixel-btn text-xs sm:text-sm px-4 sm:px-6 py-2 sm:py-2.5">
+          🎒 装備と工房 {timerMode === 'focus' && '🔒'}
+        </button>
+
+        <button
+          onClick={() => setShowSettings(!showSettings)}
+          className="pixel-btn text-xs sm:text-sm px-3 py-2 sm:py-2.5 relative"
+          title="設定・クラウド同期"
+        >
+          ⚙️
+          {user && (
+            <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-sky-500 text-[8px] text-white shadow-sm border border-slate-900">
+              ☁
+            </span>
           )}
-        </div>
-
-        {/* Feature Row 1: Inventory & Specialization */}
-        <div className="grid grid-cols-2 gap-2 w-full">
-          <button
-            onClick={() => setShowInventory(!showInventory)}
-            className="pixel-btn text-xs sm:text-sm py-2 sm:py-2.5 flex items-center justify-center gap-1.5"
-          >
-            <span>🎒</span> 装備と工房 {timerMode === 'focus' && '🔒'}
-          </button>
-
-          {(() => {
-            const unlocked = isJobUnlocked(stats.level);
-            const canChange = canChangeJobNow(stats.level, stats.lastJobChangeLevel);
-            return (
-              <button
-                onClick={() => {
-                  setIsJobMilestoneTrigger(canChange);
-                  setShowJobModal(true);
-                }}
-                className={`pixel-btn text-xs sm:text-sm py-2 sm:py-2.5 flex items-center justify-center gap-1.5 ${
-                  canChange
-                    ? '!bg-amber-600 !border-amber-400 !text-white hover:!bg-amber-500 animate-pulse'
-                    : '!bg-indigo-950/90 !border-indigo-500 !text-indigo-200 hover:!bg-indigo-900'
-                }`}
-              >
-                <span>🏛️ 特化職</span>
-                {canChange && <span className="text-[9px] bg-amber-400 text-slate-950 font-bold px-1 rounded">転職可!</span>}
-                {!unlocked && <span className="text-[9px] bg-slate-900 text-slate-400 px-1 rounded border border-slate-700">Lv.100解禁</span>}
-              </button>
-            );
-          })()}
-        </div>
-
-        {/* Feature Row 2: Guild, Auction & Settings */}
-        <div className="grid grid-cols-3 gap-2 w-full">
-          <button
-            onClick={() => {
-              if (!user) {
-                setAuthPromptFeature('guild');
-              } else {
-                setShowGuildRanking(true);
-              }
-            }}
-            className={`pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 flex items-center justify-center gap-1 ${
-              !user ? 'opacity-80 border-slate-700' : ''
-            }`}
-            title={!user ? 'ギルド（Googleログインが必要）' : 'ギルドランキング'}
-          >
-            <span>🛡️</span> ギルド {!user && <span className="text-[10px]">🔒</span>}
-          </button>
-
-          <button
-            onClick={() => {
-              if (!user) {
-                setAuthPromptFeature('auction');
-              } else {
-                setShowAuctionHouse(true);
-              }
-            }}
-            className={`pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 flex items-center justify-center gap-1 ${
-              !user ? 'opacity-80 border-slate-700' : ''
-            }`}
-            title={!user ? '取引所（Googleログインが必要）' : 'グローバルオークション'}
-          >
-            <span>⚖️</span> 取引所 {!user && <span className="text-[10px]">🔒</span>}
-          </button>
-
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className="pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 relative flex items-center justify-center gap-1"
-            title="設定・クラウド同期"
-          >
-            <span>⚙️</span> 設定
-            {user && (
-              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-sky-500 text-[8px] text-white shadow-sm border border-slate-900">
-                ☁
-              </span>
-            )}
-          </button>
-        </div>
+        </button>
       </div>
 
       {showJobModal && (
@@ -1264,21 +1029,14 @@ export default function App() {
               equipment={equipment} 
               gold={stats.gold}
               job={stats.job || 'balanced'}
-              maxStage={stats.maxStageReached}
-              playerName={auth.currentUser?.displayName || '名無し勇者'}
               onEquip={(slot, id) => setEquipment(prev => ({ ...prev, [slot]: id }))}
               onBuyItem={handleBuyItem}
               onBuyDailyItem={handleBuyDailyItem}
-              onBatchBuyItem={handleBatchBuyItem}
-              onBatchBuyDailyItems={handleBatchBuyDailyItems}
               soldOutDailyItemIds={soldOutDailyItems}
               onEnchantItem={handleEnchantItem}
               onLimitBreak={handleLimitBreak}
-              onBatchLimitBreak={handleBatchLimitBreak}
               onSpecialEnchant={handleSpecialEnchant}
-              onBatchSpecialEnchant={handleBatchSpecialEnchant}
               onSellItem={handleSellItem}
-              onBatchSellItems={handleBatchSellItems}
               onDismantleItem={handleDismantleItem}
               onToggleLock={handleToggleLock}
               onUncurseItem={handleUncurseItem}
@@ -1289,8 +1047,6 @@ export default function App() {
               onInsertGem={handleInsertGem}
               onTransferEnhancements={handleTransferEnhancements}
               isQuestActive={timerMode === 'focus'}
-              guildName={myGuildName}
-              onEngraveItem={handleEngraveItem}
             />
             <button onClick={() => setShowInventory(false)} className="pixel-btn w-full mt-4 py-2">
               とじる
@@ -1307,76 +1063,6 @@ export default function App() {
         />
       )}
 
-      {authPromptFeature && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="pixel-panel max-w-sm w-full space-y-4 bg-slate-900 border-2 border-indigo-500/80 p-5 text-center shadow-2xl">
-            <div className="text-4xl mb-1">
-              {authPromptFeature === 'guild' ? '🛡️ 🔒' : '⚖️ 🔒'}
-            </div>
-            <h3 className="text-base font-bold text-slate-100">
-              Googleアカウントでのログインが必要です
-            </h3>
-            <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/80 p-3.5 rounded border border-slate-800 text-left">
-              {authPromptFeature === 'guild'
-                ? '🛡️ ギルドの結成・加入、週間集中ランキングへの参加は、セーブデータのオンライン同期と安全なプレイヤー識別のためにGoogleアカウントでのログインが必要です。'
-                : '⚖️ グローバル取引所（オークション・定価ショップ）での武具の出品・入札・即決購入は、他プレイヤーとの公正な取引管理のためにGoogleアカウントでのログインが必要です。'}
-            </p>
-            <div className="space-y-2 pt-1">
-              <button
-                onClick={async () => {
-                  const feat = authPromptFeature;
-                  setAuthPromptFeature(null);
-                  try {
-                    await handleLogin();
-                    if (feat === 'guild') setShowGuildRanking(true);
-                    if (feat === 'auction') setShowAuctionHouse(true);
-                  } catch (e) {
-                    console.error(e);
-                  }
-                }}
-                disabled={isLoggingIn}
-                className="pixel-btn w-full py-2.5 text-xs flex items-center justify-center gap-2 active !bg-indigo-700 hover:!bg-indigo-600 !text-white font-bold border-2 !border-indigo-400 shadow-lg disabled:opacity-50"
-              >
-                <span>🌐</span> {isLoggingIn ? '認証処理中...' : 'Googleアカウントでログイン'}
-              </button>
-              <button
-                onClick={() => setAuthPromptFeature(null)}
-                className="pixel-btn w-full py-2 text-xs !bg-slate-800 text-slate-400 hover:text-slate-200"
-              >
-                とじる
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showGuildRanking && (
-        <GuildRanking 
-          onClose={() => setShowGuildRanking(false)} 
-          inventory={inventory} 
-          gold={stats.gold}
-          onRefreshGold={(amount) => setStats(s => ({ ...s, gold: Math.max(0, s.gold + amount) }))}
-          onReceiveItem={(item) => setInventory(inv => [...inv, item])}
-          onRemoveItem={(uid) => setInventory(inv => inv.filter(i => i.uid !== uid))}
-          onEngrave={(uid, text) => {
-            setInventory(prev => prev.map(item => item.uid === uid ? { ...item, engraving: text } : item));
-            showToast('✨ ギルド名を刻印しました！');
-          }} 
-          showToast={showToast}
-        />
-      )}
-      {showAuctionHouse && (
-        <AuctionHouse 
-          onClose={() => setShowAuctionHouse(false)} 
-          inventory={inventory} 
-          gold={stats.gold} 
-          creditScore={stats.creditScore || 100}
-          onRefreshGold={(amount) => setStats(s => ({ ...s, gold: Math.max(0, s.gold + amount) }))} 
-          onReceiveItem={(item) => setInventory(inv => [...inv, item])} 
-          onRemoveItem={(uid) => setInventory(inv => inv.filter(i => i.uid !== uid))} 
-          onUpdateCreditScore={(delta) => setStats(s => ({ ...s, creditScore: Math.max(0, (s.creditScore || 100) + delta) }))}
-        />
-      )}
       {showSettings && (
         <Settings 
           onClose={() => setShowSettings(false)} 

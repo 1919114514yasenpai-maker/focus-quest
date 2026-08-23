@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useMemo } from 'react';
-import { Monster, PlayerItem, JobType } from '../types';
+import React, { useEffect, useRef } from 'react';
+import { GameItem, Monster, PlayerItem, JobType } from '../types';
+import { ITEMS } from '../gameData';
 import { WEAPON_SPRITES, ARMOR_SPRITES, drawIconSprite } from '../sprites';
 import { getCompiledItem } from '../itemUtils';
-import { getDamageMultiplierBonus, getCritChanceBonus, getGoldBonusMultiplier, getXpBonusMultiplier } from '../jobUtils';
+import { getDamageMultiplierBonus, getCritChanceBonus } from '../jobUtils';
 
 interface HeroCanvasProps {
   isFocusing: boolean;
@@ -41,16 +42,7 @@ interface FloatingText {
   maxLife: number;
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  fire: '#ef4444',
-  water: '#3b82f6',
-  thunder: '#eab308',
-  light: '#f8fafc',
-  dark: '#1e293b',
-  none: '#fbbf24',
-};
-
-export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
+export const HeroCanvas: React.FC<HeroCanvasProps> = ({
   isFocusing,
   isAsleep,
   appearanceArmorId,
@@ -59,65 +51,22 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
   statArmorId,
   monster,
   inventory,
-  job,
-  hasCurseImmunity,
+  job = 'balanced',
   onAttackMonster,
   onMonsterDefeated,
   onPlayerTakeDamage,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const effectiveJob: JobType = (job || 'balanced') as JobType;
 
-  // Pre-calculate compiled items & bonuses OUTSIDE the 60fps loop for high performance
-  const combatStats = useMemo(() => {
-    const weaponItem = getCompiledItem(inventory.find(i => i.uid === statWeaponId), hasCurseImmunity);
-    const armorItem = getCompiledItem(inventory.find(i => i.uid === statArmorId), hasCurseImmunity);
-
-    const jobDmgBonus = getDamageMultiplierBonus(effectiveJob, isFocusing);
-    const jobCritBonus = getCritChanceBonus(effectiveJob);
-
-    const weaponPower = weaponItem?.power || 1;
-    const armorPower = armorItem?.power || 1;
-    const critChance = Math.min(1.0, (weaponItem?.effect?.critChance || 0) + (armorItem?.effect?.critChance || 0) + jobCritBonus);
-    const lifesteal = Math.min(1.0, (weaponItem?.effect?.lifesteal || 0) + (armorItem?.effect?.lifesteal || 0));
-    const enemySlowRate = Math.min(0.90, (weaponItem?.effect?.enemySlowRate || 0) + (armorItem?.effect?.enemySlowRate || 0));
-    const elementalDamage = (weaponItem?.effect?.elementalDamage || 0) + (armorItem?.effect?.elementalDamage || 0);
-    const elementalType = weaponItem?.effect?.elementalType || armorItem?.effect?.elementalType || 'none';
-
-    const baseDmgMult = 1 + (weaponItem?.effect?.damageMultiplier || 0) + (armorItem?.effect?.damageMultiplier || 0) + jobDmgBonus;
-    const dmgMult = Math.max(0.1, baseDmgMult);
-    const monsterAttackInterval = Math.max(50, Math.floor(50 * (1 + enemySlowRate * 1.5)));
-
-    const jobGoldBonus = getGoldBonusMultiplier(effectiveJob);
-    const jobXpBonus = getXpBonusMultiplier(effectiveJob);
-    const totalGoldBonus = (weaponItem?.effect?.goldBonus || 0) + (armorItem?.effect?.goldBonus || 0) + jobGoldBonus;
-    const totalXpBonus = (weaponItem?.effect?.xpBonus || 0) + (armorItem?.effect?.xpBonus || 0) + jobXpBonus;
-    const goldMult = Math.max(0.1, 1 + totalGoldBonus);
-    const xpMult = Math.max(0.1, 1 + totalXpBonus);
-
-    return {
-      weaponPower,
-      armorPower,
-      critChance,
-      lifesteal,
-      enemySlowRate,
-      elementalDamage,
-      elementalType,
-      dmgMult,
-      monsterAttackInterval,
-      goldMult,
-      xpMult,
-      totalGoldBonus,
-      totalXpBonus,
-    };
-  }, [inventory, statWeaponId, statArmorId, effectiveJob, hasCurseImmunity, isFocusing]);
-
-  // Keep latest mutable props and cached stats in ref without triggering canvas remount
+  // ステータスと特殊効果の参照を常に最新に保持するRef
   const propsRef = useRef({
     isFocusing,
     isAsleep,
+    statWeaponId,
+    statArmorId,
     monster,
-    combatStats,
+    inventory,
+    job,
     onAttackMonster,
     onMonsterDefeated,
     onPlayerTakeDamage,
@@ -127,25 +76,27 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
     propsRef.current = {
       isFocusing,
       isAsleep,
+      statWeaponId,
+      statArmorId,
       monster,
-      combatStats,
+      inventory,
+      job,
       onAttackMonster,
       onMonsterDefeated,
       onPlayerTakeDamage,
     };
-  }, [isFocusing, isAsleep, monster, combatStats, onAttackMonster, onMonsterDefeated, onPlayerTakeDamage]);
+  }, [isFocusing, isAsleep, statWeaponId, statArmorId, monster, inventory, job, onAttackMonster, onMonsterDefeated, onPlayerTakeDamage]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: false });
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    ctx.imageSmoothingEnabled = false;
 
     let animationFrameId: number;
     let elapsed = 0;
 
+    // 戦闘状態
     let currentEnemyHp = monster.maxHp;
     let enemyHitTimer = 0;
     let playerHitTimer = 0;
@@ -156,9 +107,10 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
     let textIdCounter = 0;
     let slashTimer = 0;
 
+    // モンスター変更検知
     let lastMonsterId = monster.id;
 
-    // Responsive canvas dimension sync
+    // キャンバスサイズのレスポンシブ同期
     const updateCanvasDimensions = () => {
       const rect = canvas.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
@@ -167,7 +119,6 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         if (canvas.width !== dWidth || canvas.height !== dHeight) {
           canvas.width = dWidth;
           canvas.height = dHeight;
-          ctx.imageSmoothingEnabled = false;
         }
       }
     };
@@ -178,31 +129,24 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
     });
     resizeObserver.observe(canvas);
 
-    const spawnParticles = (x: number, y: number, color: string, count = 10) => {
-      // Keep particle count bounded to prevent lag
-      if (particles.length > 40) {
-        particles.splice(0, particles.length - 30);
-      }
+    const spawnParticles = (x: number, y: number, color: string, count = 12) => {
       for (let i = 0; i < count; i++) {
         const angle = Math.random() * Math.PI * 2;
-        const speed = 2 + Math.random() * 4;
+        const speed = 2 + Math.random() * 5;
         particles.push({
           x,
           y,
           vx: Math.cos(angle) * speed,
           vy: Math.sin(angle) * speed - 2,
           color,
-          size: Math.floor(Math.random() * 2 + 2),
+          size: Math.floor(Math.random() * 3 + 2),
           life: 0,
-          maxLife: 16 + Math.random() * 10,
+          maxLife: 20 + Math.random() * 15,
         });
       }
     };
 
     const addFloatingText = (text: string, x: number, y: number, color: string) => {
-      if (floatTexts.length > 8) {
-        floatTexts.shift();
-      }
       floatTexts.push({
         id: ++textIdCounter,
         text,
@@ -210,26 +154,19 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         y,
         color,
         life: 0,
-        maxLife: 35,
+        maxLife: 40,
       });
     };
 
     const draw = () => {
       elapsed += 1;
-      const {
-        isFocusing,
-        isAsleep,
-        monster: currentMonster,
-        combatStats: cStats,
-        onAttackMonster,
-        onMonsterDefeated,
-        onPlayerTakeDamage,
-      } = propsRef.current;
+      const { isFocusing, isAsleep, statWeaponId, statArmorId, monster: currentMonster, onAttackMonster, onMonsterDefeated, onPlayerTakeDamage } = propsRef.current;
 
       const groundY = canvas.height - 70;
       const heroX = 180;
       const heroY = groundY;
 
+      // モンスター切り替え時のリセット
       if (lastMonsterId !== currentMonster.id) {
         lastMonsterId = currentMonster.id;
         currentEnemyHp = currentMonster.maxHp;
@@ -240,15 +177,16 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       const scale = 4;
       const isRunning = isFocusing && !isAsleep;
 
+      // 画面揺れ変換
       ctx.save();
       if (screenShake > 0) {
         screenShake--;
-        const shakeX = (Math.random() - 0.5) * 6;
-        const shakeY = (Math.random() - 0.5) * 6;
+        const shakeX = (Math.random() - 0.5) * 8;
+        const shakeY = (Math.random() - 0.5) * 8;
         ctx.translate(shakeX, shakeY);
       }
 
-      // Background
+      // 1. 深淵・ダンジョンの背景
       const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
       grad.addColorStop(0, '#090d16');
       grad.addColorStop(0.7, '#111827');
@@ -256,8 +194,8 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Stars
-      for (let i = 0; i < 20; i++) {
+      // 2. 星屑/浮遊粒子
+      for (let i = 0; i < 25; i++) {
         const x = (i * 137 + elapsed * (isRunning ? 1.5 : 0.2)) % canvas.width;
         const y = (i * 73) % (canvas.height - 80);
         const starSize = (i % 3 === 0) ? 3 : 2;
@@ -265,10 +203,10 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         ctx.fillRect(Math.floor(x), Math.floor(y), starSize, starSize);
       }
 
-      // Ground
+      // 3. 地面
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(0, groundY, canvas.width, 70);
-
+      
       ctx.strokeStyle = '#334155';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -283,20 +221,44 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         ctx.fillRect(Math.floor(x + 16), groundY + 24, 16, 4);
       }
 
-      // Animation calculation
+      // アニメーション計算
       const walkCycle = isRunning ? Math.sin(elapsed * 0.25) : 0;
       const bounceY = Math.abs(walkCycle) * 4 * scale;
       const attackCycle = isRunning ? (elapsed % 30) : 0;
       const isAttacking = isRunning && attackCycle > 18;
 
-      // Spotlight glow
-      const glow = ctx.createRadialGradient(heroX, heroY - 30, 0, heroX, heroY - 30, 130);
-      glow.addColorStop(0, 'rgba(56, 189, 248, 0.22)');
+      // スポットライト
+      const glow = ctx.createRadialGradient(heroX, heroY - 30, 0, heroX, heroY - 30, 140);
+      glow.addColorStop(0, 'rgba(56, 189, 248, 0.25)');
       glow.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = glow;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Fast combat logic reading precomputed stats
+      // 装備効果と職業効果の取得
+      const { inventory, job: currentJob, hasCurseImmunity } = propsRef.current;
+      const weaponItem = getCompiledItem(inventory.find(i => i.uid === statWeaponId), hasCurseImmunity);
+      const armorItem = getCompiledItem(inventory.find(i => i.uid === statArmorId), hasCurseImmunity);
+
+      const jobDmgBonus = getDamageMultiplierBonus(currentJob, isFocusing);
+      const jobCritBonus = getCritChanceBonus(currentJob);
+
+      const weaponPower = weaponItem?.power || 1;
+      const armorPower = armorItem?.power || 1;
+      const critChance = Math.min(1.0, (weaponItem?.effect?.critChance || 0) + (armorItem?.effect?.critChance || 0) + jobCritBonus);
+      const lifesteal = Math.min(1.0, (weaponItem?.effect?.lifesteal || 0) + (armorItem?.effect?.lifesteal || 0));
+      const enemySlowRate = Math.min(0.90, (weaponItem?.effect?.enemySlowRate || 0) + (armorItem?.effect?.enemySlowRate || 0));
+      
+      const elementalDamage = (weaponItem?.effect?.elementalDamage || 0) + (armorItem?.effect?.elementalDamage || 0);
+      const elementalType = weaponItem?.effect?.elementalType || armorItem?.effect?.elementalType || 'none';
+
+      // 呪い等によるダメージ倍率補正 + 職業ダメージボーナス
+      const baseDmgMult = 1 + (weaponItem?.effect?.damageMultiplier || 0) + (armorItem?.effect?.damageMultiplier || 0) + jobDmgBonus;
+      const dmgMult = Math.max(0.1, baseDmgMult);
+
+      // 敵の攻撃間隔 (標準50フレーム、敵攻撃速度低下時に間隔が延びる)
+      const monsterAttackInterval = Math.max(50, Math.floor(50 * (1 + enemySlowRate * 1.5)));
+
+      // 敵移動 & 攻撃ロジック
       if (isRunning) {
         if (enemyX > heroX + 60) {
           enemyX -= 3;
@@ -304,38 +266,45 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
           enemyX = heroX + 60;
         }
 
-        if (cStats.enemySlowRate > 0 && enemyX <= heroX + 80 && currentEnemyHp > 0) {
-          if (elapsed % 15 === 0) {
+        // 粘り属性(スロー効果)の視覚エフェクト
+        if (enemySlowRate > 0 && enemyX <= heroX + 80 && currentEnemyHp > 0) {
+          if (elapsed % 12 === 0) {
             spawnParticles(
-              enemyX + 20 + (Math.random() - 0.5) * 20,
-              heroY - 30 + (Math.random() - 0.5) * 20,
-              '#22c55e',
-              2
+              enemyX + 20 + (Math.random() - 0.5) * 20, 
+              heroY - 30 + (Math.random() - 0.5) * 20, 
+              '#22c55e', 
+              3
             );
           }
           if (elapsed % 90 === 0) {
-            addFloatingText(`🕸️ 攻撃速度-${Math.round(cStats.enemySlowRate * 100)}%`, enemyX, heroY - 70, '#4ade80');
+            addFloatingText(`🕸️ 攻撃速度-${Math.round(enemySlowRate * 100)}%`, enemyX, heroY - 70, '#4ade80');
           }
         }
 
-        // Hero Attack
+        // 勇者の攻撃（30フレーム毎）
         if (attackCycle === 22 && enemyX <= heroX + 65) {
           enemyHitTimer = 10;
           slashTimer = 12;
 
-          const isCrit = Math.random() < Math.max(0.01, 0.1 + cStats.critChance);
-          const rawDmg = 12 + cStats.weaponPower * 5 + Math.floor(Math.random() * 8);
-          const baseDmg = Math.floor(rawDmg * cStats.dmgMult) + cStats.elementalDamage;
+          const isCrit = Math.random() < Math.max(0.01, 0.1 + critChance);
+          const rawDmg = 12 + weaponPower * 5 + Math.floor(Math.random() * 8);
+          const baseDmg = Math.floor(rawDmg * dmgMult) + elementalDamage;
           const damage = isCrit ? Math.floor(baseDmg * 2.2) : baseDmg;
-          const lifestealHeal = cStats.lifesteal > 0 ? Math.floor(damage * cStats.lifesteal) : 0;
+          const lifestealHeal = lifesteal > 0 ? Math.floor(damage * lifesteal) : 0;
 
           currentEnemyHp = Math.max(0, currentEnemyHp - damage);
 
-          const dmgColor = cStats.elementalDamage > 0 && cStats.elementalType !== 'none'
-            ? (TYPE_COLORS[cStats.elementalType] || '#fbbf24')
-            : '#fbbf24';
+          const typeColors: Record<string, string> = {
+            'fire': '#ef4444',
+            'water': '#3b82f6',
+            'thunder': '#eab308',
+            'light': '#f8fafc',
+            'dark': '#1e293b',
+            'none': '#fbbf24'
+          };
+          const dmgColor = elementalDamage > 0 && elementalType !== 'none' ? typeColors[elementalType] : '#fbbf24';
 
-          spawnParticles(enemyX + 20, heroY - 40, isCrit ? '#f43f5e' : dmgColor, isCrit ? 16 : 10);
+          spawnParticles(enemyX + 20, heroY - 40, isCrit ? '#f43f5e' : dmgColor, isCrit ? 20 : 12);
           addFloatingText(isCrit ? `CRITICAL! -${damage}` : `-${damage}`, enemyX + 10, heroY - 60, isCrit ? '#f43f5e' : dmgColor);
 
           if (lifestealHeal > 0) {
@@ -344,35 +313,26 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
 
           onAttackMonster(damage, isCrit, lifestealHeal);
 
+          // 敵撃破チェック
           if (currentEnemyHp <= 0) {
-            const finalXp = Math.max(1, Math.floor(currentMonster.xpReward * cStats.xpMult));
-            const finalGold = Math.max(1, Math.floor(currentMonster.goldReward * cStats.goldMult));
-
-            spawnParticles(enemyX + 20, heroY - 40, '#a855f7', 25);
-            addFloatingText('討伐成功!', enemyX, heroY - 80, '#38bdf8');
-            addFloatingText(`+${finalXp} EXP`, heroX, heroY - 80, '#38bdf8');
-            addFloatingText(
-              cStats.goldMult > 1 
-                ? `+${finalGold} G (+${Math.round((cStats.goldMult - 1) * 100)}%)` 
-                : `+${finalGold} G`, 
-              heroX + 20, 
-              heroY - 95, 
-              '#f59e0b'
-            );
+            spawnParticles(enemyX + 20, heroY - 40, '#a855f7', 35);
+            addFloatingText(`討伐成功!`, enemyX, heroY - 80, '#38bdf8');
+            addFloatingText(`+${currentMonster.xpReward} EXP`, heroX, heroY - 80, '#38bdf8');
+            addFloatingText(`+${currentMonster.goldReward} G`, heroX + 20, heroY - 95, '#f59e0b');
 
             onMonsterDefeated(currentMonster);
-            enemyX = canvas.width + 100;
+            enemyX = canvas.width + 100; // 次の敵へ
           }
         }
 
-        // Monster Attack
-        if (elapsed % cStats.monsterAttackInterval === 0 && enemyX <= heroX + 65 && currentEnemyHp > 0) {
+        // 敵からの反撃 (monsterAttackInterval毎)
+        if (elapsed % monsterAttackInterval === 0 && enemyX <= heroX + 65 && currentEnemyHp > 0) {
           const rawMonsterAtk = currentMonster.attack;
-          const netDamage = Math.max(1, rawMonsterAtk - Math.floor(cStats.armorPower * 0.8));
+          const netDamage = Math.max(1, rawMonsterAtk - Math.floor(armorPower * 0.8));
 
           playerHitTimer = 12;
-          screenShake = 6;
-          spawnParticles(heroX, heroY - 30, '#ef4444', 8);
+          screenShake = 8;
+          spawnParticles(heroX, heroY - 30, '#ef4444', 10);
           addFloatingText(`-${netDamage}`, heroX - 10, heroY - 50, '#ef4444');
 
           onPlayerTakeDamage(netDamage);
@@ -381,7 +341,7 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         enemyX = canvas.width + 100;
       }
 
-      // Draw Monster
+      // 敵の描画
       if (enemyX < canvas.width + 50) {
         drawPixelMonster(
           ctx,
@@ -398,23 +358,24 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       if (enemyHitTimer > 0) enemyHitTimer--;
       if (playerHitTimer > 0) playerHitTimer--;
 
-      // Draw Hero
+      // 勇者描画
       ctx.save();
       ctx.translate(heroX, heroY);
 
       drawDetailedPixelHero(
-        ctx,
-        scale,
-        bounceY,
-        isAsleep,
-        walkCycle,
-        appearanceArmorId,
+        ctx, 
+        scale, 
+        bounceY, 
+        isAsleep, 
+        walkCycle, 
+        appearanceArmorId, 
         playerHitTimer > 0
       );
 
-      let weaponAngle = Math.PI / 4;
+      // 武器 & 斬撃
+      let weaponAngle = Math.PI / 4; // 待機時は45度
       if (isAttacking) {
-        weaponAngle = Math.PI / 1.5;
+        weaponAngle = Math.PI / 1.5; // 攻撃時は振り下ろす
       } else if (isRunning) {
         weaponAngle = Math.PI / 4 + Math.sin(elapsed * 0.15) * 0.2;
       }
@@ -434,46 +395,34 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
 
       ctx.restore();
 
-      // Render & Update Particles
-      let pLen = particles.length;
-      let pWriteIdx = 0;
-      for (let i = 0; i < pLen; i++) {
-        const p = particles[i];
+      // パーティクル更新 & 描画
+      particles = particles.filter(p => {
         p.x += p.vx;
         p.y += p.vy;
         p.vy += 0.25;
         p.life++;
-        if (p.life < p.maxLife) {
-          const alpha = 1 - p.life / p.maxLife;
-          ctx.fillStyle = p.color;
-          ctx.globalAlpha = Math.max(0, alpha);
-          ctx.fillRect(Math.floor(p.x), Math.floor(p.y), p.size, p.size);
-          particles[pWriteIdx++] = p;
-        }
-      }
-      particles.length = pWriteIdx;
-      ctx.globalAlpha = 1;
+        const alpha = 1 - p.life / p.maxLife;
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(0, alpha);
+        ctx.fillRect(Math.floor(p.x), Math.floor(p.y), p.size, p.size);
+        ctx.globalAlpha = 1;
+        return p.life < p.maxLife;
+      });
 
-      // Render & Update Floating Texts
-      let ftLen = floatTexts.length;
-      let ftWriteIdx = 0;
-      ctx.font = 'bold 13px "DotGothic16", monospace';
-      for (let i = 0; i < ftLen; i++) {
-        const ft = floatTexts[i];
+      // フローティングテキスト更新 & 描画
+      floatTexts = floatTexts.filter(ft => {
         ft.y -= 1.2;
         ft.life++;
-        if (ft.life < ft.maxLife) {
-          const alpha = 1 - ft.life / ft.maxLife;
-          ctx.fillStyle = ft.color;
-          ctx.globalAlpha = Math.max(0, alpha);
-          ctx.fillText(ft.text, Math.floor(ft.x), Math.floor(ft.y));
-          floatTexts[ftWriteIdx++] = ft;
-        }
-      }
-      floatTexts.length = ftWriteIdx;
-      ctx.globalAlpha = 1;
+        const alpha = 1 - ft.life / ft.maxLife;
+        ctx.fillStyle = ft.color;
+        ctx.globalAlpha = Math.max(0, alpha);
+        ctx.font = 'bold 14px "DotGothic16", monospace';
+        ctx.fillText(ft.text, Math.floor(ft.x), Math.floor(ft.y));
+        ctx.globalAlpha = 1;
+        return ft.life < ft.maxLife;
+      });
 
-      ctx.restore();
+      ctx.restore(); // screenShakeの終了
 
       animationFrameId = requestAnimationFrame(draw);
     };
@@ -494,9 +443,7 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
   );
 };
 
-export const HeroCanvas = React.memo(HeroCanvasComponent);
-
-// Pixel drawing helpers
+// --- 精巧なドット絵勇者描画 ---
 function drawDetailedPixelHero(
   ctx: CanvasRenderingContext2D,
   scale: number,
@@ -508,12 +455,14 @@ function drawDetailedPixelHero(
 ) {
   const oy = -bounceY;
 
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  // 影
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
   ctx.beginPath();
-  ctx.ellipse(0, 2, (14 * scale) / 2, (3 * scale) / 2, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 2, 14 * scale / 2, 3 * scale / 2, 0, 0, Math.PI * 2);
   ctx.fill();
 
   const armorSprite = ARMOR_SPRITES[armorId] || ARMOR_SPRITES['a_cloth'];
+  // Hero Sprite bounds: centered at 0, Y from oy-16*scale to oy
   drawIconSprite(ctx, armorSprite, -8 * scale, oy - 16 * scale, scale, isAsleep, isHit);
 }
 
@@ -529,11 +478,14 @@ function drawDetailedPixelWeapon(
   ctx.rotate(angle);
 
   const weaponSprite = WEAPON_SPRITES[weaponId] || WEAPON_SPRITES['w_wood_sword'];
+  // We center the weapon handle. The handle is roughly at the bottom.
+  // Assuming 16x16, the handle is around (8, 14).
   drawIconSprite(ctx, weaponSprite, -8 * scale, -14 * scale, scale);
 
   ctx.restore();
 }
 
+// --- タイプ別モンスター描画（スライム/ゴブリン/オーク/デビル/ドラゴン） ---
 function drawPixelMonster(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -550,9 +502,11 @@ function drawPixelMonster(
 
   const floatY = Math.sin(elapsed * 0.1) * 3 * scale;
   const oy = -18 * scale + floatY;
+
   const bodyColor = isHit ? '#ffffff' : monster.color;
 
   if (monster.spriteType === 'slime') {
+    // スライム
     ctx.fillStyle = bodyColor;
     ctx.fillRect(-6 * scale, oy + 4 * scale, 12 * scale, 8 * scale);
     ctx.fillRect(-8 * scale, oy + 6 * scale, 16 * scale, 5 * scale);
@@ -562,79 +516,98 @@ function drawPixelMonster(
     ctx.fillRect(-4 * scale, oy + 5 * scale, 2 * scale, 2 * scale);
     ctx.fillRect(2 * scale, oy + 5 * scale, 2 * scale, 2 * scale);
   } else if (monster.spriteType === 'goblin') {
+    // ゴブリン
     ctx.fillStyle = bodyColor;
-    ctx.fillRect(-5 * scale, oy, 10 * scale, 8 * scale);
-    ctx.fillRect(-8 * scale, oy - 2 * scale, 3 * scale, 4 * scale);
-    ctx.fillRect(5 * scale, oy - 2 * scale, 3 * scale, 4 * scale);
+    ctx.fillRect(-5 * scale, oy, 10 * scale, 12 * scale); // 胴
+    ctx.fillRect(-4 * scale, oy - 7 * scale, 8 * scale, 7 * scale); // 頭
+    ctx.fillRect(-7 * scale, oy - 6 * scale, 3 * scale, 2 * scale); // 耳
+    ctx.fillRect(4 * scale, oy - 6 * scale, 3 * scale, 2 * scale);
 
-    ctx.fillStyle = '#991b1b';
-    ctx.fillRect(-4 * scale, oy + 8 * scale, 8 * scale, 8 * scale);
-
-    ctx.fillStyle = '#facc15';
-    ctx.fillRect(-3 * scale, oy + 2 * scale, 2 * scale, 2 * scale);
-    ctx.fillRect(1 * scale, oy + 2 * scale, 2 * scale, 2 * scale);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(-2 * scale, oy - 4 * scale, 2 * scale, 2 * scale);
+    ctx.fillRect(2 * scale, oy - 4 * scale, 2 * scale, 2 * scale);
   } else if (monster.spriteType === 'orc') {
+    // オーク
     ctx.fillStyle = bodyColor;
-    ctx.fillRect(-8 * scale, oy - 4 * scale, 16 * scale, 12 * scale);
-    ctx.fillStyle = '#475569';
-    ctx.fillRect(-7 * scale, oy + 8 * scale, 14 * scale, 10 * scale);
+    ctx.fillRect(-8 * scale, oy - 2 * scale, 16 * scale, 14 * scale); // 巨体
+    ctx.fillRect(-6 * scale, oy - 10 * scale, 12 * scale, 8 * scale); // 頭
 
-    ctx.fillStyle = '#ef4444';
-    ctx.fillRect(-5 * scale, oy + 1 * scale, 2 * scale, 2 * scale);
-    ctx.fillRect(3 * scale, oy + 1 * scale, 2 * scale, 2 * scale);
+    // 牙
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(-4 * scale, oy - 3 * scale, 2 * scale, 3 * scale);
+    ctx.fillRect(2 * scale, oy - 3 * scale, 2 * scale, 3 * scale);
   } else if (monster.spriteType === 'demon') {
-    ctx.fillStyle = '#7f1d1d';
-    ctx.fillRect(-6 * scale, oy - 6 * scale, 3 * scale, 5 * scale);
-    ctx.fillRect(3 * scale, oy - 6 * scale, 3 * scale, 5 * scale);
-
+    // デビル
     ctx.fillStyle = bodyColor;
-    ctx.fillRect(-7 * scale, oy - 2 * scale, 14 * scale, 18 * scale);
+    ctx.fillRect(-6 * scale, oy - 2 * scale, 12 * scale, 14 * scale);
+    ctx.fillRect(-5 * scale, oy - 9 * scale, 10 * scale, 7 * scale);
 
-    ctx.fillStyle = '#f59e0b';
-    ctx.fillRect(-4 * scale, oy + 2 * scale, 3 * scale, 3 * scale);
-    ctx.fillRect(1 * scale, oy + 2 * scale, 3 * scale, 3 * scale);
+    // 角
+    ctx.fillStyle = '#f43f5e';
+    ctx.fillRect(-6 * scale, oy - 13 * scale, 2 * scale, 4 * scale);
+    ctx.fillRect(4 * scale, oy - 13 * scale, 2 * scale, 4 * scale);
+
+    // 羽
+    ctx.fillRect(-12 * scale, oy - 6 * scale, 6 * scale, 8 * scale);
+    ctx.fillRect(6 * scale, oy - 6 * scale, 6 * scale, 8 * scale);
   } else {
-    // dragon
+    // ドラゴン
     ctx.fillStyle = bodyColor;
-    ctx.fillRect(-10 * scale, oy - 6 * scale, 20 * scale, 22 * scale);
-    ctx.fillRect(-14 * scale, oy - 12 * scale, 5 * scale, 10 * scale);
-    ctx.fillRect(9 * scale, oy - 12 * scale, 5 * scale, 10 * scale);
+    ctx.fillRect(-10 * scale, oy - 6 * scale, 20 * scale, 18 * scale); // 胴体
+    ctx.fillRect(-8 * scale, oy - 16 * scale, 16 * scale, 10 * scale); // 頭
 
-    ctx.fillStyle = '#facc15';
-    ctx.fillRect(-6 * scale, oy + 2 * scale, 3 * scale, 3 * scale);
-    ctx.fillRect(3 * scale, oy + 2 * scale, 3 * scale, 3 * scale);
+    // 巨大な羽
+    ctx.fillStyle = '#991b1b';
+    ctx.fillRect(-18 * scale, oy - 18 * scale, 10 * scale, 12 * scale);
+    ctx.fillRect(8 * scale, oy - 18 * scale, 10 * scale, 12 * scale);
+
+    // 目
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillRect(-4 * scale, oy - 12 * scale, 3 * scale, 3 * scale);
+    ctx.fillRect(2 * scale, oy - 12 * scale, 3 * scale, 3 * scale);
   }
 
-  // HP Bar
-  const hpBarW = 20 * scale;
-  const hpBarH = 3 * scale;
-  const hpRatio = Math.max(0, Math.min(1, hp / maxHp));
+  // モンスター名とHPバー
+  ctx.font = 'bold 12px "DotGothic16", monospace';
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.fillText(monster.name, 0, oy - 12 * scale);
 
-  ctx.fillStyle = '#0f172a';
-  ctx.fillRect(-hpBarW / 2, oy - 8 * scale, hpBarW, hpBarH);
-
-  ctx.fillStyle = hpRatio > 0.5 ? '#22c55e' : hpRatio > 0.2 ? '#f59e0b' : '#ef4444';
-  ctx.fillRect(-hpBarW / 2 + 1, oy - 8 * scale + 1, (hpBarW - 2) * hpRatio, hpBarH - 2);
+  ctx.fillStyle = '#1e293b';
+  ctx.fillRect(-12 * scale, oy - 8 * scale, 24 * scale, 3 * scale);
+  const hpPercent = Math.max(0, hp / monster.maxHp);
+  ctx.fillStyle = '#ef4444';
+  ctx.fillRect(-12 * scale, oy - 8 * scale, 24 * scale * hpPercent, 3 * scale);
 
   ctx.restore();
 }
 
 function drawSlashEffect(ctx: CanvasRenderingContext2D, scale: number, bounceY: number) {
   ctx.save();
-  ctx.translate(22 * scale, -10 * scale - bounceY);
-  ctx.strokeStyle = '#fef08a';
-  ctx.lineWidth = 3 * scale;
+  ctx.translate(15 * scale, -12 * scale - bounceY);
+  ctx.rotate(-Math.PI / 6);
+
+  ctx.fillStyle = 'rgba(56, 189, 248, 0.9)';
   ctx.beginPath();
-  ctx.arc(0, 0, 14 * scale, -Math.PI / 4, Math.PI / 4);
-  ctx.stroke();
+  ctx.arc(0, 0, 25 * scale, -Math.PI / 3, Math.PI / 3);
+  ctx.lineTo(0, 0);
+  ctx.fill();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(0, 0, 18 * scale, -Math.PI / 4, Math.PI / 4);
+  ctx.lineTo(0, 0);
+  ctx.fill();
+
   ctx.restore();
 }
 
 function drawZzzEffects(ctx: CanvasRenderingContext2D, scale: number, elapsed: number) {
-  const zzzOffset = (elapsed * 0.05) % 1;
+  const step = (elapsed % 90) / 30;
+  ctx.fillStyle = '#cbd5e1';
   ctx.font = 'bold 16px "DotGothic16", monospace';
-  ctx.fillStyle = '#93c5fd';
-  ctx.fillText('z', 6 * scale + zzzOffset * 8, -18 * scale - zzzOffset * 20);
-  ctx.font = 'bold 20px "DotGothic16", monospace';
-  ctx.fillText('Z', 12 * scale + zzzOffset * 10, -26 * scale - zzzOffset * 22);
+
+  if (step >= 0) ctx.fillText('Z', 8 * scale, -24 * scale);
+  if (step >= 1) ctx.fillText('z', 16 * scale, -32 * scale);
+  if (step >= 2) ctx.fillText('z', 22 * scale, -40 * scale);
 }

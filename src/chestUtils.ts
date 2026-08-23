@@ -1,5 +1,5 @@
 import { ChestReward, PlayerItem, JobType } from './types';
-import { ITEMS, generateUid, isCraftExclusiveItem } from './gameData';
+import { ITEMS, generateUid } from './gameData';
 
 export const CHEST_TYPES = {
   WOODEN: {
@@ -66,13 +66,10 @@ export const generateChestReward = (chestId: string, stage: number, focusMinutes
   const baseGold = Math.floor((200 + stage * 30 + focusMinutes * 15) * goldMultiplier);
   const baseXp = Math.floor((300 + stage * 50 + focusMinutes * 25) * xpMultiplier);
 
-  // Filter possible weapon/armor items according to rank/stage (exclude craft only items)
+  // Filter possible weapon/armor items according to rank/stage
   const allItemKeys = Object.keys(ITEMS);
-  const weaponsAndArmors = allItemKeys.filter(k => 
-    (ITEMS[k].type === 'weapon' || ITEMS[k].type === 'armor') && 
-    !isCraftExclusiveItem(ITEMS[k])
-  );
-  const materials = allItemKeys.filter(k => ITEMS[k].type === 'material' && !isCraftExclusiveItem(ITEMS[k]));
+  const weaponsAndArmors = allItemKeys.filter(k => ITEMS[k].type === 'weapon' || ITEMS[k].type === 'armor');
+  const materials = allItemKeys.filter(k => ITEMS[k].type === 'material');
 
   const rewardItems: PlayerItem[] = [];
 
