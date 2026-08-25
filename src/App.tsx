@@ -23,8 +23,11 @@ import {
   getNextJobChangeLevel
 } from './jobUtils';
 import { useCloudSave } from './useCloudSave';
-import { db, auth } from './firebase';
+import { db, auth, getAccessToken } from './firebase';
 import { doc, getDoc, updateDoc, setDoc, increment } from 'firebase/firestore';
+import { getTaskLists, getTasks, createTask, completeTask, GoogleTask, TaskList } from './tasksApi';
+import { CustomGem } from './components/CustomGem';
+import { FlashcardsModal } from './components/FlashcardsModal';
 
 import { DailyShopItem } from './dailyShopUtils';
 
@@ -47,10 +50,22 @@ export default function App() {
   const [showJobModal, setShowJobModal] = useState(false);
   const [showGuildRanking, setShowGuildRanking] = useState(false);
   const [showAuctionHouse, setShowAuctionHouse] = useState(false);
+  const [showFlashcards, setShowFlashcards] = useState(false);
   const [authPromptFeature, setAuthPromptFeature] = useState<'guild' | 'auction' | null>(null);
   const [myGuildName, setMyGuildName] = useState<string | undefined>();
   const [isJobMilestoneTrigger, setIsJobMilestoneTrigger] = useState(false);
 
+  const [focusAnimationsEnabled, setFocusAnimationsEnabled] = useState<boolean>(() => localStorage.getItem('focus_quest_anim') !== 'false');
+  const [keepScreenAwake, setKeepScreenAwake] = useState<boolean>(() => localStorage.getItem('focus_quest_awake') !== 'false');
+  const [currentTaskText, setCurrentTaskText] = useState<string>('');
+  
+  // Google Tasks State
+  const [taskLists, setTaskLists] = useState<TaskList[]>([]);
+  const [selectedTaskListId, setSelectedTaskListId] = useState<string>('');
+  const [googleTasks, setGoogleTasks] = useState<GoogleTask[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string>('');
+  const [isTasksLoading, setIsTasksLoading] = useState(false);
+  
   const [pendingChestReward, setPendingChestReward] = useState<ChestReward | null>(null);
   const [pendingChestFocusMins, setPendingChestFocusMins] = useState<number | undefined>(undefined);
   const [deathNotice, setDeathNotice] = useState<string | null>(null);
@@ -163,6 +178,77 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [user, saveToCloud]);
+
+  // Load Google Tasks lists on auth
+  useEffect(() => {
+    if (user && getAccessToken()) {
+      setIsTasksLoading(true);
+      getTaskLists().then(lists => {
+        setTaskLists(lists);
+        if (lists.length > 0) {
+          setSelectedTaskListId(lists[0].id);
+        }
+        setIsTasksLoading(false);
+      });
+    } else {
+      setTaskLists([]);
+      setGoogleTasks([]);
+      setSelectedTaskListId('');
+      setSelectedTaskId('');
+    }
+  }, [user]);
+
+  // Load Google Tasks when a list is selected
+  useEffect(() => {
+    if (selectedTaskListId && getAccessToken()) {
+      setIsTasksLoading(true);
+      getTasks(selectedTaskListId).then(tasks => {
+        setGoogleTasks(tasks);
+        setIsTasksLoading(false);
+      });
+    } else {
+      setGoogleTasks([]);
+    }
+  }, [selectedTaskListId]);
+
+  // WakeLock & BeforeUnload (集中中の機能)
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  useEffect(() => {
+    if (timerMode === 'focus') {
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        e.preventDefault();
+        e.returnValue = '';
+      };
+      window.addEventListener('beforeunload', handleBeforeUnload);
+
+      const requestWakeLock = async () => {
+        if (keepScreenAwake && 'wakeLock' in navigator) {
+          try {
+            wakeLockRef.current = await navigator.wakeLock.request('screen');
+          } catch (err) {
+            console.warn('Wake Lock request failed:', err);
+          }
+        }
+      };
+      requestWakeLock();
+
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible' && keepScreenAwake) {
+          requestWakeLock();
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        if (wakeLockRef.current) {
+          wakeLockRef.current.release().catch(console.warn);
+          wakeLockRef.current = null;
+        }
+      };
+    }
+  }, [timerMode, keepScreenAwake]);
 
   const statArmorItem = getCompiledItem(inventory.find(i => i.uid === equipment.statArmorId), stats.hasCurseImmunity);
   const statWeaponItem = getCompiledItem(inventory.find(i => i.uid === equipment.statWeaponId), stats.hasCurseImmunity);
@@ -332,7 +418,26 @@ export default function App() {
 
       setInventory(prev => [...prev, newChestItem]);
       updateWeeklyFocusTime(focusMinutes);
-      showToast(`🎁 集中達成！「${chestItem?.name || '宝箱'}」を素材欄に獲得しました！（素材欄からいつでも開封できます）`);
+      const taskMsg = currentTaskText ? `タスク「${currentTaskText}」完了！` : '集中達成！';
+      showToast(`🎁 ${taskMsg}「${chestItem?.name || '宝箱'}」を素材欄に獲得しました！（素材欄からいつでも開封できます）`);
+      
+      // Update Google Tasks
+      if (user && getAccessToken() && currentTaskText && selectedTaskListId) {
+        if (selectedTaskId) {
+          completeTask(selectedTaskListId, selectedTaskId).then(() => {
+            setGoogleTasks(prev => prev.filter(t => t.id !== selectedTaskId));
+          });
+        } else {
+          createTask(selectedTaskListId, currentTaskText).then(newTask => {
+            if (newTask) {
+              completeTask(selectedTaskListId, newTask.id);
+            }
+          });
+        }
+      }
+
+      setCurrentTaskText('');
+      setSelectedTaskId('');
 
       setStats(prev => ({ ...prev, hp: prev.maxHp }));
       setTimerMode('break');
@@ -353,10 +458,16 @@ export default function App() {
     setPendingChestFocusMins(undefined);
   };
 
-  const handleOpenChestItem = (pItem: PlayerItem) => {
+  const handleOpenChestItem = (itemOrUid: PlayerItem | string) => {
+    const pItem = typeof itemOrUid === 'string' 
+      ? inventory.find(i => i.uid === itemOrUid)
+      : itemOrUid;
+    if (!pItem) return;
     setInventory(prev => prev.filter(i => i.uid !== pItem.uid));
+    const boxName = ITEMS[pItem.baseId]?.name || '宝箱';
     if (pItem.packedItems && pItem.packedItems.length > 0) {
       setPendingChestReward({
+        chestName: boxName,
         gold: 0,
         xp: 0,
         items: pItem.packedItems,
@@ -1161,21 +1272,106 @@ export default function App() {
 
       <div className="mt-auto relative z-10 p-2 sm:p-3 pb-3 flex flex-col items-center gap-2 pointer-events-auto w-full max-w-md mx-auto">
         {/* Main Quest Action */}
-        <div className="w-full">
+        <div className="w-full flex flex-col gap-2">
           {timerMode === 'idle' ? (
-            <button
-              onClick={handleStartFocus}
-              className="pixel-btn active text-xs sm:text-sm w-full py-2.5 sm:py-3 shadow-lg flex items-center justify-center gap-2 font-bold"
-            >
-              <span>⚔️</span> 集中クエスト開始 ({focusMinutes}分)
-            </button>
+            <>
+              {user && getAccessToken() && taskLists.length > 0 ? (
+                <div className="flex flex-col gap-1 w-full bg-slate-900 border border-slate-700 p-2 rounded">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] sm:text-xs text-indigo-300 font-bold">✅ ToDo</span>
+                    <select
+                      value={selectedTaskListId}
+                      onChange={(e) => {
+                        setSelectedTaskListId(e.target.value);
+                        setSelectedTaskId('');
+                        setCurrentTaskText('');
+                      }}
+                      className="pixel-input flex-1 min-w-0 text-[10px] sm:text-xs bg-slate-950 border border-slate-700 text-amber-200 rounded p-1 truncate"
+                    >
+                      {taskLists.map(list => (
+                        <option key={list.id} value={list.id}>{list.title}</option>
+                      ))}
+                    </select>
+                    {isTasksLoading && <span className="text-xs text-amber-400 animate-pulse">⏳</span>}
+                  </div>
+                  <div className="flex gap-2 mt-1">
+                    <select
+                      value={selectedTaskId}
+                      onChange={(e) => {
+                        setSelectedTaskId(e.target.value);
+                        if (e.target.value) {
+                          const task = googleTasks.find(t => t.id === e.target.value);
+                          if (task) setCurrentTaskText(task.title);
+                        } else {
+                          setCurrentTaskText('');
+                        }
+                      }}
+                      className="pixel-input flex-1 min-w-0 text-[10px] sm:text-xs bg-slate-950 border border-slate-700 text-slate-200 rounded p-1 truncate"
+                    >
+                      <option value="">新規タスク作成（自由入力）</option>
+                      {googleTasks.map(task => (
+                        <option key={task.id} value={task.id}>{task.title}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {!selectedTaskId && (
+                    <input
+                      type="text"
+                      placeholder="これからやるタスクを入力（完了時にGoogle ToDoへ保存）"
+                      value={currentTaskText}
+                      onChange={(e) => setCurrentTaskText(e.target.value)}
+                      className="pixel-input text-[10px] sm:text-xs w-full p-1.5 bg-slate-950 border border-slate-700 text-slate-200 placeholder-slate-500 rounded mt-1"
+                    />
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1 w-full">
+                  {user && !getAccessToken() && (
+                    <div className="text-[9px] text-amber-300/80 mb-1 px-1 flex items-center justify-between">
+                      <span>※設定からGoogleに再ログインするとToDoと連携できます</span>
+                    </div>
+                  )}
+                  <input
+                    type="text"
+                    placeholder="これからやるタスクを入力（任意）"
+                    value={currentTaskText}
+                    onChange={(e) => setCurrentTaskText(e.target.value)}
+                    className="pixel-input text-xs w-full p-2 bg-slate-900 border border-slate-700 text-slate-200 placeholder-slate-500 rounded"
+                  />
+                </div>
+              )}
+              <button
+                onClick={handleStartFocus}
+                className="pixel-btn active text-xs sm:text-sm w-full py-2.5 sm:py-3 shadow-lg flex items-center justify-center gap-2 font-bold mt-1"
+              >
+                <span>⚔️</span> 集中クエスト開始 ({focusMinutes}分)
+              </button>
+            </>
           ) : timerMode === 'focus' ? (
-            <button
-              onClick={handleStop}
-              className="pixel-btn !border-rose-600 !text-rose-300 hover:!bg-rose-950/60 text-xs sm:text-sm w-full py-2.5 sm:py-3 font-bold"
-            >
-              🏃 撤退する
-            </button>
+            <div className="flex flex-col gap-1 w-full">
+              {currentTaskText && (
+                <div className="text-[10px] sm:text-xs text-amber-200 bg-amber-950/40 p-2 rounded border border-amber-800 text-center truncate">
+                  🎯 目標: {currentTaskText}
+                </div>
+              )}
+              {(() => {
+                const timePassed = focusMinutes * 60 - timeLeft;
+                const canCancel = timePassed < 10;
+                return (
+                  <button
+                    onClick={handleStop}
+                    disabled={!canCancel}
+                    className={`pixel-btn text-xs sm:text-sm w-full py-2.5 sm:py-3 font-bold ${
+                      canCancel 
+                        ? '!border-rose-600 !text-rose-300 hover:!bg-rose-950/60' 
+                        : '!border-slate-700 !text-slate-500 bg-slate-900 opacity-50 cursor-not-allowed'
+                    }`}
+                  >
+                    {canCancel ? '🏃 撤退する (10秒以内のみ可能)' : '🔒 撤退不可（戦闘中！）'}
+                  </button>
+                );
+              })()}
+            </div>
           ) : (
             <div className="flex gap-2 w-full">
               <button
@@ -1226,8 +1422,8 @@ export default function App() {
           })()}
         </div>
 
-        {/* Feature Row 2: Guild, Auction & Settings */}
-        <div className="grid grid-cols-3 gap-2 w-full">
+        {/* Feature Row 2: Guild & Auction */}
+        <div className="grid grid-cols-2 gap-2 w-full">
           <button
             onClick={() => {
               if (!user) {
@@ -1258,6 +1454,17 @@ export default function App() {
             title={!user ? '取引所（Googleログインが必要）' : 'グローバルオークション'}
           >
             <span>⚖️</span> 取引所 {!user && <span className="text-[10px]">🔒</span>}
+          </button>
+        </div>
+
+        {/* Feature Row 3: Flashcards & Settings */}
+        <div className="grid grid-cols-2 gap-2 w-full mt-2">
+          <button
+            onClick={() => setShowFlashcards(true)}
+            className="pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 flex items-center justify-center gap-1"
+            title="単語帳・魔導書"
+          >
+            <span>📖</span> 魔導書（単語帳）
           </button>
 
           <button
@@ -1428,6 +1635,10 @@ export default function App() {
             await loadFromCloud();
             showToast('☁️ クラウドから最新データを再読み込みしました！');
           }}
+          focusAnimationsEnabled={focusAnimationsEnabled}
+          setFocusAnimationsEnabled={setFocusAnimationsEnabled}
+          keepScreenAwake={keepScreenAwake}
+          setKeepScreenAwake={setKeepScreenAwake}
         />
       )}
 
@@ -1474,6 +1685,15 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {showFlashcards && (
+        <FlashcardsModal
+          onClose={() => setShowFlashcards(false)}
+          showToast={showToast}
+        />
+      )}
+
+      <CustomGem />
     </div>
   );
 }

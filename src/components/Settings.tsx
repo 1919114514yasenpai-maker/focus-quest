@@ -20,6 +20,10 @@ interface SettingsProps {
   onSaveToCloud?: () => void;
   onLoadFromCloud?: () => void;
   onClearSyncError?: () => void;
+  focusAnimationsEnabled: boolean;
+  setFocusAnimationsEnabled: (v: boolean) => void;
+  keepScreenAwake: boolean;
+  setKeepScreenAwake: (v: boolean) => void;
 }
 
 export const Settings: React.FC<SettingsProps> = ({
@@ -36,6 +40,10 @@ export const Settings: React.FC<SettingsProps> = ({
   onSaveToCloud,
   onLoadFromCloud,
   onClearSyncError,
+  focusAnimationsEnabled,
+  setFocusAnimationsEnabled,
+  keepScreenAwake,
+  setKeepScreenAwake,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPasteModal, setShowPasteModal] = useState(false);
@@ -161,6 +169,38 @@ export const Settings: React.FC<SettingsProps> = ({
     <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="pixel-panel max-w-sm w-full space-y-4 bg-slate-900/95 max-h-[90vh] overflow-y-auto">
         <h2 className="text-lg font-bold text-slate-100 text-center mb-2 border-b border-slate-700 pb-2">⚙️ 設定・データ引継ぎ</h2>
+
+        {/* 環境設定 */}
+        <div className="bg-slate-950 p-3 rounded border border-slate-800 space-y-3 mb-2 text-xs">
+          <div className="font-bold text-amber-400 mb-1">🎮 クエスト環境設定</div>
+          <label className="flex items-center justify-between cursor-pointer group">
+            <span className="text-slate-200 group-hover:text-amber-200">集中中のアニメーションを有効にする</span>
+            <input 
+              type="checkbox" 
+              className="accent-amber-500 w-4 h-4 cursor-pointer"
+              checked={focusAnimationsEnabled}
+              onChange={(e) => {
+                setFocusAnimationsEnabled(e.target.checked);
+                localStorage.setItem('focus_quest_anim', e.target.checked.toString());
+              }}
+            />
+          </label>
+          <label className="flex items-center justify-between cursor-pointer group">
+            <div className="flex flex-col">
+              <span className="text-slate-200 group-hover:text-amber-200">集中中の画面スリープを防止する</span>
+              <span className="text-[9px] text-slate-400">※対応ブラウザのみ。バッテリー消費に注意。</span>
+            </div>
+            <input 
+              type="checkbox" 
+              className="accent-amber-500 w-4 h-4 cursor-pointer"
+              checked={keepScreenAwake}
+              onChange={(e) => {
+                setKeepScreenAwake(e.target.checked);
+                localStorage.setItem('focus_quest_awake', e.target.checked.toString());
+              }}
+            />
+          </label>
+        </div>
 
         {/* 読み込み確認モーダル */}
         {pendingData ? (

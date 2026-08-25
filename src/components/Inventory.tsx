@@ -230,7 +230,10 @@ export const Inventory: React.FC<InventoryProps> = ({
       return type === 'material' || type === 'chest' || type === 'gem' || type === 'consumable';
     });
     const grouped: Record<string, { items: PlayerItem[] }> = nonEq.reduce((acc, item) => {
-      const key = `${item.baseId}_${item.isLocked ? 'locked' : 'unlocked'}`;
+      const isPackedBox = !!(item.packedItems && item.packedItems.length > 0);
+      const key = isPackedBox
+        ? `packed_${item.uid}`
+        : `${item.baseId}_${item.isLocked ? 'locked' : 'unlocked'}`;
       if (!acc[key]) acc[key] = { items: [] };
       acc[key].items.push(item);
       return acc;
@@ -1089,6 +1092,12 @@ export const Inventory: React.FC<InventoryProps> = ({
     const appSlot: keyof EquipmentState = compiled.type === 'weapon' ? 'appearanceWeaponId' : 'appearanceArmorId';
     const sellPrice = calculateSellPrice(detailPlayerItem, job);
 
+    const isChest = baseItem.type === 'chest';
+    const isConsumable = baseItem.type === 'consumable';
+    const isMaterial = baseItem.type === 'material';
+    const isGem = baseItem.type === 'gem';
+    const isEquip = baseItem.type === 'weapon' || baseItem.type === 'armor';
+
     const basePrice = baseItem.price || 100;
     const halfBase = Math.floor(basePrice * 0.5);
     const enchantBonus = detailPlayerItem.upgradeLevel > 0 ? Math.floor(basePrice * 0.20 * detailPlayerItem.upgradeLevel) : 0;
@@ -1109,8 +1118,25 @@ export const Inventory: React.FC<InventoryProps> = ({
             ✕
           </button>
 
+          {/* ヘッダー情報 */}
           <div className="flex items-center gap-3 border-b border-slate-800 pb-3 mb-3">
-            <ItemIcon item={{ ...compiled, id: detailPlayerItem.baseId }} size={48} />
+            <div className="w-12 h-12 flex items-center justify-center bg-slate-950 border border-slate-700 rounded shadow-inner flex-shrink-0">
+              {isChest ? (
+                <span className="text-3xl select-none">
+                  {baseItem.name.includes('伝説') ? '👑' : baseItem.name.includes('金') ? '🧰' : baseItem.name.includes('銀') ? '🎁' : '📦'}
+                </span>
+              ) : isConsumable ? (
+                <span className="text-3xl select-none">
+                  {detailPlayerItem.packedItems ? '📦' : '📜'}
+                </span>
+              ) : isGem ? (
+                <span className="text-3xl select-none">💎</span>
+              ) : isMaterial ? (
+                <ItemIcon item={{ ...compiled, id: detailPlayerItem.baseId }} size={48} />
+              ) : (
+                <ItemIcon item={{ ...compiled, id: detailPlayerItem.baseId }} size={48} />
+              )}
+            </div>
             <div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-base font-bold text-slate-100">{compiled.name}</span>
@@ -1129,309 +1155,461 @@ export const Inventory: React.FC<InventoryProps> = ({
                     ★ 特殊強化 {specialCount}回
                   </span>
                 )}
+                {isChest && (
+                  <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-600 px-1.5 py-0.5 rounded font-bold">
+                    🧰 開封可能
+                  </span>
+                )}
+                {detailPlayerItem.packedItems && (
+                  <span className="text-[10px] bg-sky-950 text-sky-300 border border-sky-600 px-1.5 py-0.5 rounded font-bold">
+                    📦 梱包済 ({detailPlayerItem.packedItems.length}個)
+                  </span>
+                )}
               </div>
               <div className="text-xs text-slate-400 flex items-center gap-2 mt-1">
-                <span>種別: {compiled.type === 'weapon' ? '⚔️ 武器' : '🛡️ 防具'}</span>
-                <span>(ベース: {baseItem.name})</span>
+                <span>種別: {isEquip ? (compiled.type === 'weapon' ? '⚔️ 武器' : '🛡️ 防具') : isChest ? '🧰 宝箱' : isConsumable ? '📜 道具・消費アイテム' : isGem ? '💎 宝石' : '🧱 素材'}</span>
+                {isEquip && <span>(ベース: {baseItem.name})</span>}
               </div>
             </div>
           </div>
 
-          {/* ステータス内訳 */}
-          <div className="bg-slate-950 p-3 rounded border border-slate-800 mb-3">
-            <h4 className="text-xs font-bold text-amber-300 mb-2 border-b border-slate-800 pb-1">📊 能力値・強化ステータス詳細</h4>
-            
-            <div className="grid grid-cols-2 gap-2 text-xs mb-3">
-              <div className="bg-slate-900/90 p-2 rounded border border-slate-800">
-                <div className="text-[10px] text-slate-400">基本{compiled.type === 'weapon' ? '攻撃力' : '防御力'}</div>
-                <div className="text-sm font-bold text-slate-200">+{baseItem.power}</div>
-              </div>
-              <div className="bg-slate-900/90 p-2 rounded border border-slate-800">
-                <div className="text-[10px] text-slate-400">基本強化 (Lv.{detailPlayerItem.upgradeLevel})</div>
-                <div className="text-sm font-bold text-rose-300">+{detailPlayerItem.upgradeLevel * 3}</div>
-              </div>
-              <div className="bg-slate-900/90 p-2 rounded border border-slate-800">
-                <div className="text-[10px] text-purple-300 font-bold">★ 特殊強化 ({specialCount}回実施)</div>
-                <div className="text-sm font-bold text-purple-300">+{detailPlayerItem.addedPower}</div>
-              </div>
-              <div className="bg-slate-900/90 p-2 rounded border border-slate-800">
-                <div className="text-[10px] text-slate-400">限界突破</div>
-                <div className="text-sm font-bold text-sky-300">{(detailPlayerItem.limitBreak || 0) > 0 ? `+${detailPlayerItem.limitBreak}凸` : '未実施'}</div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between bg-amber-950/40 p-2.5 rounded border border-amber-800/80">
-              <span className="text-xs font-bold text-amber-200">🔥 総合 {compiled.type === 'weapon' ? '攻撃力' : '防御力'}:</span>
-              <span className="text-lg font-black text-amber-300">+{compiled.power}</span>
-            </div>
-          </div>
-
-          {/* 特殊効果 / 呪い */}
-          {compiled.effect && (
-            <div className="bg-slate-950 p-3 rounded border border-slate-800 mb-3">
-              <h4 className="text-xs font-bold text-sky-300 mb-1">✨ 付与効果・スキル</h4>
-              <div className="text-xs text-sky-200 leading-relaxed">
-                {compiled.effect.description}
-              </div>
-            </div>
-          )}
-
-          {/* 査定価値 / 売却内訳 */}
-          <div className="bg-slate-950 p-3 rounded border border-slate-800 mb-3">
-            <h4 className="text-xs font-bold text-amber-300 mb-2 border-b border-slate-800 pb-1">💰 鍛冶屋売却査定価格の内訳</h4>
-            <div className="space-y-1 text-[11px] text-slate-300 mb-2">
-              <div className="flex justify-between">
-                <span className="text-slate-400">基本価格 (定価の50%):</span>
-                <span>🪙 {halfBase} G</span>
-              </div>
-              {enchantBonus > 0 && (
-                <div className="flex justify-between text-rose-300">
-                  <span>基本強化ボーナス (Lv.{detailPlayerItem.upgradeLevel}):</span>
-                  <span>+🪙 {enchantBonus} G</span>
-                </div>
-              )}
-              {limitBreakBonus > 0 && (
-                <div className="flex justify-between text-sky-300">
-                  <span>限界突破ボーナス ({detailPlayerItem.limitBreak}凸):</span>
-                  <span>+🪙 {limitBreakBonus} G</span>
-                </div>
-              )}
-              {specialEnchantBonus > 0 && (
-                <div className="flex justify-between text-purple-300">
-                  <span>特殊強化ボーナス ({specialCount}回):</span>
-                  <span>+🪙 {specialEnchantBonus} G</span>
-                </div>
-              )}
-              {addedPowerBonus > 0 && (
-                <div className="flex justify-between text-amber-300">
-                  <span>追加能力ボーナス:</span>
-                  <span>+🪙 {addedPowerBonus} G</span>
-                </div>
-              )}
-            </div>
-            <div className="flex justify-between items-center pt-1 border-t border-slate-800 text-xs font-bold">
-              <span className="text-amber-200">合計売却査定額:</span>
-              <span className="text-amber-300 text-sm font-black">🪙 {sellPrice} G</span>
-            </div>
-          </div>
-
-          {/* 宝石スロット (武器のみ) */}
-          {compiled.type === 'weapon' && (
-            <div className="bg-slate-950 p-3 rounded border border-slate-800 mb-3">
-              <h4 className="text-xs font-bold text-emerald-300 mb-2 border-b border-slate-800 pb-1 flex items-center justify-between">
-                <span>💎 宝石スロット ({detailPlayerItem.slottedGems?.length || 0}/{detailPlayerItem.unlockedSockets || 0})</span>
-              </h4>
-              
-              <div className="space-y-2 mb-3">
-                {Array.from({ length: Math.max(detailPlayerItem.unlockedSockets || 0, 1) }).map((_, idx) => {
-                  if (idx >= (detailPlayerItem.unlockedSockets || 0)) return null;
-                  const gemId = detailPlayerItem.slottedGems?.[idx];
-                  const gem = gemId ? ITEMS[gemId] : null;
-                  return (
-                    <div key={idx} className="flex items-center gap-2 p-2 bg-slate-900 border border-slate-800 rounded">
-                      <div className="w-6 h-6 rounded bg-slate-950 border border-slate-700 flex items-center justify-center flex-shrink-0">
-                        {gem ? '💎' : <span className="text-[10px] text-slate-600">空</span>}
-                      </div>
-                      <div className="flex-1 text-[10px]">
-                        {gem ? (
-                          <>
-                            <div className="font-bold text-slate-200">{gem.name}</div>
-                            <div className="text-sky-300">{gem.effect?.description}</div>
-                          </>
-                        ) : (
-                          <div className="text-slate-500">空きスロット</div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-                {(detailPlayerItem.unlockedSockets || 0) === 0 && (
-                  <div className="text-[10px] text-slate-500 text-center py-2">
-                    スロットが空いていません。穴開けを行ってください。
-                  </div>
-                )}
+          {/* 宝箱専用詳細 */}
+          {isChest && (
+            <div className="space-y-3 mb-4">
+              <div className="bg-slate-950 p-3 rounded border border-amber-700/60">
+                <h4 className="text-xs font-bold text-amber-300 mb-1">🎁 宝箱の詳細</h4>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  {baseItem.effect?.description || 'クエスト達成報酬の宝箱です。開封すると武器・防具や素材、ゴールド、経験値を獲得できます！'}
+                </p>
               </div>
 
-              <div className="flex flex-col gap-2">
-                {/* 穴開けボタン */}
-                {(detailPlayerItem.unlockedSockets || 0) < 3 && (
-                  <button
-                    onClick={() => {
-                      if (onOpenSocket) onOpenSocket(detailPlayerItem.uid);
-                      setDetailPlayerItem(null);
-                    }}
-                    disabled={detailPlayerItem.isLocked || isQuestActive || gold < 5000 * ((detailPlayerItem.unlockedSockets || 0) + 1)}
-                    className="pixel-btn text-[10px] w-full !bg-slate-800 active disabled:opacity-40"
-                  >
-                    ⛏️ 穴を開ける (🪙 {5000 * ((detailPlayerItem.unlockedSockets || 0) + 1)} G / 成功率 {Math.floor((0.5 - ((detailPlayerItem.unlockedSockets || 0) * 0.15) + (job === 'artisan' ? 0.3 : 0)) * 100)}%)
-                  </button>
-                )}
-                
-                {/* 宝石をはめるセレクト (空きスロットがある場合のみ表示) */}
-                {(detailPlayerItem.unlockedSockets || 0) > (detailPlayerItem.slottedGems?.length || 0) && (
-                  <div className="flex gap-2">
-                    <select 
-                      id="gem-select"
-                      className="pixel-input text-[10px] flex-1 !p-1 bg-slate-900 border border-slate-700 text-slate-300"
-                    >
-                      <option value="">宝石を選択...</option>
-                      {inventory.filter(i => ITEMS[i.baseId]?.type === 'gem' && !i.isLocked).map(i => (
-                        <option key={i.uid} value={i.uid}>{ITEMS[i.baseId].name}</option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => {
-                        const select = document.getElementById('gem-select') as HTMLSelectElement;
-                        if (select && select.value && onInsertGem) {
-                          onInsertGem(detailPlayerItem.uid, select.value);
-                          setDetailPlayerItem(null);
-                        }
-                      }}
-                      disabled={detailPlayerItem.isLocked || isQuestActive}
-                      className="pixel-btn text-[10px] !py-1 !bg-emerald-900 !text-emerald-100 !border-emerald-600 active disabled:opacity-40"
-                    >
-                      はめ込む
-                    </button>
-                  </div>
-                )}
+              <div className="bg-slate-950 p-3 rounded border border-slate-800 flex justify-between items-center text-xs">
+                <span className="text-slate-400">売却価格:</span>
+                <span className="text-amber-300 font-bold text-sm">🪙 {sellPrice} G</span>
               </div>
-            </div>
-          )}
 
-          
-            {detailPlayerItem.baseId.startsWith('c_empty_box_') && !detailPlayerItem.packedItems && (
+              {/* 開封ボタン */}
               <button
                 onClick={() => {
-                  setPackBoxItem(detailPlayerItem);
-                  setSelectedPackItemUids([]);
+                  if (onOpenChest) onOpenChest(detailPlayerItem);
                   setDetailPlayerItem(null);
                 }}
                 disabled={isQuestActive}
-                className="pixel-btn text-xs w-full !bg-amber-700 !text-amber-100 !border-amber-500 font-bold py-2 mb-2"
+                className="pixel-btn text-sm w-full !bg-gradient-to-r !from-amber-500 !to-amber-600 hover:!from-amber-400 hover:!to-amber-500 !text-slate-950 font-black py-2.5 !border-amber-300 shadow-lg active:scale-95 transition-all"
               >
-                📦 アイテムを詰める（何個でも可能）
+                🔓 宝箱を開封する！
               </button>
-            )}
-            {detailPlayerItem.packedItems && (
-               <div className="bg-slate-900 p-2.5 rounded border border-amber-600 mb-2">
-                 <div className="flex items-center justify-between text-amber-400 text-xs font-bold mb-1.5 border-b border-amber-800/60 pb-1">
-                   <span>🎁 梱包済みのアイテム: {detailPlayerItem.packedItems.length} 個</span>
-                 </div>
-                 <div className="flex flex-col gap-1 max-h-40 overflow-y-auto pr-1">
-                   {detailPlayerItem.packedItems.map(p => (
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    if (onSellItem) onSellItem(detailPlayerItem.uid, sellPrice);
+                    setDetailPlayerItem(null);
+                  }}
+                  disabled={isQuestActive || detailPlayerItem.isLocked}
+                  className="pixel-btn text-xs flex-1 !border-amber-400 disabled:opacity-40"
+                >
+                  {detailPlayerItem.isLocked ? '🔒 ロック中' : `💰 🪙${sellPrice}G で売却`}
+                </button>
+                <button
+                  onClick={() => onToggleLock && onToggleLock(detailPlayerItem.uid)}
+                  className="pixel-btn text-xs flex-1 !bg-slate-800 !border-slate-600"
+                >
+                  {detailPlayerItem.isLocked ? '🔒 ロック解除' : '🔓 ロックする'}
+                </button>
+                <button
+                  onClick={() => setDetailPlayerItem(null)}
+                  className="pixel-btn text-xs flex-1 !bg-slate-800 !text-slate-300 !border-slate-600"
+                >
+                  閉じる
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 消費アイテム/梱包箱専用詳細 */}
+          {isConsumable && (
+            <div className="space-y-3 mb-4">
+              <div className="bg-slate-950 p-3 rounded border border-slate-800">
+                <h4 className="text-xs font-bold text-sky-300 mb-1">📜 道具の説明</h4>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  {baseItem.effect?.description || '消費型の特殊アイテムです。'}
+                </p>
+              </div>
+
+              {detailPlayerItem.baseId.startsWith('c_empty_box_') && !detailPlayerItem.packedItems && (
+                <button
+                  onClick={() => {
+                    setPackBoxItem(detailPlayerItem);
+                    setSelectedPackItemUids([]);
+                    setDetailPlayerItem(null);
+                  }}
+                  disabled={isQuestActive}
+                  className="pixel-btn text-xs w-full !bg-amber-700 hover:!bg-amber-600 !text-amber-100 !border-amber-500 font-bold py-2"
+                >
+                  📦 アイテムを詰める（何個でも可能）
+                </button>
+              )}
+
+              {detailPlayerItem.packedItems && (
+                <div className="bg-slate-900 p-2.5 rounded border border-amber-600">
+                  <div className="flex items-center justify-between text-amber-400 text-xs font-bold mb-1.5 border-b border-amber-800/60 pb-1">
+                    <span>🎁 梱包済みのアイテム: {detailPlayerItem.packedItems.length} 個</span>
+                  </div>
+                  <div className="flex flex-col gap-1 max-h-40 overflow-y-auto pr-1">
+                    {detailPlayerItem.packedItems.map(p => (
                       <div key={p.uid} className="text-[11px] text-slate-200 bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800 flex justify-between items-center">
                         <span>- {ITEMS[p.baseId]?.name}</span>
                         {p.upgradeLevel > 0 && <span className="text-amber-400 font-bold">+{p.upgradeLevel}</span>}
                       </div>
-                   ))}
-                 </div>
-                 <button
-                   onClick={() => {
-                     if (onOpenChest) onOpenChest(detailPlayerItem.uid);
-                     setDetailPlayerItem(null);
-                   }}
-                   disabled={isQuestActive}
-                   className="pixel-btn text-xs w-full !bg-amber-600 hover:!bg-amber-500 !text-white font-bold py-1.5 mt-2"
-                 >
-                   🎁 箱を開封して中身を取り出す ({detailPlayerItem.packedItems.length} 個)
-                 </button>
-               </div>
-            )}
-
-          {/* アクションボタン */}
-          <div className="flex flex-col gap-2">
-            {isCursedDetail && (
-              <button
-                onClick={() => {
-                  setUncurseConfirmItem({ item: detailPlayerItem, gameItem: compiled, cost: uncurseDetailCost });
-                }}
-                disabled={gold < uncurseDetailCost || isQuestActive}
-                className="pixel-btn text-xs w-full !bg-purple-900 !text-purple-100 !border-purple-400 font-bold py-2 active disabled:opacity-40"
-              >
-                ✝️ 呪いを解除（解呪）する (費用: 🪙 {uncurseDetailCost.toLocaleString()} G)
-              </button>
-            )}
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  onEquip(statSlot, compiled.id);
-                  setDetailPlayerItem(null);
-                }}
-                disabled={isStatEq || isQuestActive}
-                className={`pixel-btn text-xs flex-1 ${isStatEq ? 'active !border-emerald-400 !text-emerald-300' : ''}`}
-              >
-                {isStatEq ? '能力: 装備中' : '能力を装備'}
-              </button>
-              <button
-                onClick={() => {
-                  onEquip(appSlot, detailPlayerItem.baseId);
-                  setDetailPlayerItem(null);
-                }}
-                disabled={isAppEq || isQuestActive}
-                className={`pixel-btn text-xs flex-1 ${isAppEq ? 'active !border-purple-400 !text-purple-300' : ''}`}
-              >
-                {isAppEq ? '見た目: 装備中' : '見た目を装備'}
-              </button>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  if (onSellItem) onSellItem(detailPlayerItem.uid, sellPrice);
-                  setDetailPlayerItem(null);
-                }}
-                disabled={isStatEq || isQuestActive || detailPlayerItem.isLocked}
-                className="pixel-btn text-xs flex-1 !border-amber-400 disabled:opacity-40"
-              >
-                {isStatEq ? '装備中不可' : detailPlayerItem.isLocked ? '🔒 ロック中' : `💰 🪙${sellPrice}G で売却`}
-              </button>
-              <button
-                onClick={() => {
-                  setDismantleConfirmItem({ item: detailPlayerItem, gameItem: baseItem });
-                }}
-                disabled={isStatEq || isQuestActive || detailPlayerItem.isLocked}
-                className="pixel-btn text-xs flex-1 !bg-slate-800 !text-slate-300 hover:!bg-slate-700 disabled:opacity-40"
-              >
-                {isStatEq ? '装備中不可' : detailPlayerItem.isLocked ? '🔒 ロック中' : '🔨 分解する'}
-              </button>
-            </div>
-
-            <div className="flex gap-2 flex-wrap">
-              {guildName && !detailPlayerItem.engraving && onEngraveItem && (
-                <button 
-                  onClick={() => {
-                    if (confirm(`「${compiled.name}」にギルド名「${guildName}」を刻印しますか？`)) {
-                      onEngraveItem(detailPlayerItem.uid, guildName);
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (onOpenChest) onOpenChest(detailPlayerItem);
                       setDetailPlayerItem(null);
-                    }
-                  }}
-                  className="pixel-btn text-xs flex-1 min-w-[40%] !bg-indigo-700 !border-indigo-500 hover:!bg-indigo-600"
-                >
-                  🛡️ ギルド刻印
-                </button>
+                    }}
+                    disabled={isQuestActive}
+                    className="pixel-btn text-xs w-full !bg-amber-600 hover:!bg-amber-500 !text-white font-bold py-2 mt-2"
+                  >
+                    🎁 箱を開封して中身を取り出す ({detailPlayerItem.packedItems.length} 個)
+                  </button>
+                </div>
               )}
-              <button
-                onClick={() => onToggleLock && onToggleLock(detailPlayerItem.uid)}
-                className="pixel-btn text-xs flex-1 !bg-slate-800 !border-slate-600"
-              >
-                {detailPlayerItem.isLocked ? '🔒 ロック解除' : '🔓 ロックする'}
-              </button>
-              <button
-                onClick={() => setDetailPlayerItem(null)}
-                className="pixel-btn text-xs flex-1 !bg-slate-800 !text-slate-300 !border-slate-600"
-              >
-                閉じる
-              </button>
+
+              <div className="bg-slate-950 p-3 rounded border border-slate-800 flex justify-between items-center text-xs">
+                <span className="text-slate-400">売却価格:</span>
+                <span className="text-amber-300 font-bold text-sm">🪙 {sellPrice} G</span>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    if (onSellItem) onSellItem(detailPlayerItem.uid, sellPrice);
+                    setDetailPlayerItem(null);
+                  }}
+                  disabled={isQuestActive || detailPlayerItem.isLocked}
+                  className="pixel-btn text-xs flex-1 !border-amber-400 disabled:opacity-40"
+                >
+                  {detailPlayerItem.isLocked ? '🔒 ロック中' : `💰 🪙${sellPrice}G で売却`}
+                </button>
+                <button
+                  onClick={() => onToggleLock && onToggleLock(detailPlayerItem.uid)}
+                  className="pixel-btn text-xs flex-1 !bg-slate-800 !border-slate-600"
+                >
+                  {detailPlayerItem.isLocked ? '🔒 ロック解除' : '🔓 ロックする'}
+                </button>
+                <button
+                  onClick={() => setDetailPlayerItem(null)}
+                  className="pixel-btn text-xs flex-1 !bg-slate-800 !text-slate-300 !border-slate-600"
+                >
+                  閉じる
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* 素材・宝石専用詳細 */}
+          {(isMaterial || isGem) && (
+            <div className="space-y-3 mb-4">
+              <div className="bg-slate-950 p-3 rounded border border-slate-800">
+                <h4 className="text-xs font-bold text-sky-300 mb-1">{isGem ? '💎 宝石の効果' : '🧱 素材の用途'}</h4>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  {baseItem.effect?.description || (isGem ? '武器のソケットにはめ込むことで属性や特殊効果を付与できます。' : '鍛冶屋での装備クラフトや特殊強化に使用する素材です。')}
+                </p>
+              </div>
+
+              <div className="bg-slate-950 p-3 rounded border border-slate-800 flex justify-between items-center text-xs">
+                <span className="text-slate-400">売却価格:</span>
+                <span className="text-amber-300 font-bold text-sm">🪙 {sellPrice} G</span>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    if (onSellItem) onSellItem(detailPlayerItem.uid, sellPrice);
+                    setDetailPlayerItem(null);
+                  }}
+                  disabled={isQuestActive || detailPlayerItem.isLocked}
+                  className="pixel-btn text-xs flex-1 !border-amber-400 disabled:opacity-40"
+                >
+                  {detailPlayerItem.isLocked ? '🔒 ロック中' : `💰 🪙${sellPrice}G で売却`}
+                </button>
+                <button
+                  onClick={() => onToggleLock && onToggleLock(detailPlayerItem.uid)}
+                  className="pixel-btn text-xs flex-1 !bg-slate-800 !border-slate-600"
+                >
+                  {detailPlayerItem.isLocked ? '🔒 ロック解除' : '🔓 ロックする'}
+                </button>
+                <button
+                  onClick={() => setDetailPlayerItem(null)}
+                  className="pixel-btn text-xs flex-1 !bg-slate-800 !text-slate-300 !border-slate-600"
+                >
+                  閉じる
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 武器・防具専用詳細 */}
+          {isEquip && (
+            <div>
+              {/* ステータス内訳 */}
+              <div className="bg-slate-950 p-3 rounded border border-slate-800 mb-3">
+                <h4 className="text-xs font-bold text-amber-300 mb-2 border-b border-slate-800 pb-1">📊 能力値・強化ステータス詳細</h4>
+                
+                <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                  <div className="bg-slate-900/90 p-2 rounded border border-slate-800">
+                    <div className="text-[10px] text-slate-400">基本{compiled.type === 'weapon' ? '攻撃力' : '防御力'}</div>
+                    <div className="text-sm font-bold text-slate-200">+{baseItem.power}</div>
+                  </div>
+                  <div className="bg-slate-900/90 p-2 rounded border border-slate-800">
+                    <div className="text-[10px] text-slate-400">基本強化 (Lv.{detailPlayerItem.upgradeLevel})</div>
+                    <div className="text-sm font-bold text-rose-300">+{detailPlayerItem.upgradeLevel * 3}</div>
+                  </div>
+                  <div className="bg-slate-900/90 p-2 rounded border border-slate-800">
+                    <div className="text-[10px] text-purple-300 font-bold">★ 特殊強化 ({specialCount}回実施)</div>
+                    <div className="text-sm font-bold text-purple-300">+{detailPlayerItem.addedPower}</div>
+                  </div>
+                  <div className="bg-slate-900/90 p-2 rounded border border-slate-800">
+                    <div className="text-[10px] text-slate-400">限界突破</div>
+                    <div className="text-sm font-bold text-sky-300">{(detailPlayerItem.limitBreak || 0) > 0 ? `+${detailPlayerItem.limitBreak}凸` : '未実施'}</div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between bg-amber-950/40 p-2.5 rounded border border-amber-800/80">
+                  <span className="text-xs font-bold text-amber-200">🔥 総合 {compiled.type === 'weapon' ? '攻撃力' : '防御力'}:</span>
+                  <span className="text-lg font-black text-amber-300">+{compiled.power}</span>
+                </div>
+              </div>
+
+              {/* 特殊効果 / 呪い */}
+              {compiled.effect && (
+                <div className="bg-slate-950 p-3 rounded border border-slate-800 mb-3">
+                  <h4 className="text-xs font-bold text-sky-300 mb-1">✨ 付与効果・スキル</h4>
+                  <div className="text-xs text-sky-200 leading-relaxed">
+                    {compiled.effect.description}
+                  </div>
+                </div>
+              )}
+
+              {/* 査定価値 / 売却内訳 */}
+              <div className="bg-slate-950 p-3 rounded border border-slate-800 mb-3">
+                <h4 className="text-xs font-bold text-amber-300 mb-2 border-b border-slate-800 pb-1">💰 鍛冶屋売却査定価格の内訳</h4>
+                <div className="space-y-1 text-[11px] text-slate-300 mb-2">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">基本価格 (定価の50%):</span>
+                    <span>🪙 {halfBase} G</span>
+                  </div>
+                  {enchantBonus > 0 && (
+                    <div className="flex justify-between text-rose-300">
+                      <span>基本強化ボーナス (Lv.{detailPlayerItem.upgradeLevel}):</span>
+                      <span>+🪙 {enchantBonus} G</span>
+                    </div>
+                  )}
+                  {limitBreakBonus > 0 && (
+                    <div className="flex justify-between text-sky-300">
+                      <span>限界突破ボーナス ({detailPlayerItem.limitBreak}凸):</span>
+                      <span>+🪙 {limitBreakBonus} G</span>
+                    </div>
+                  )}
+                  {specialEnchantBonus > 0 && (
+                    <div className="flex justify-between text-purple-300">
+                      <span>特殊強化ボーナス ({specialCount}回):</span>
+                      <span>+🪙 {specialEnchantBonus} G</span>
+                    </div>
+                  )}
+                  {addedPowerBonus > 0 && (
+                    <div className="flex justify-between text-amber-300">
+                      <span>追加能力ボーナス:</span>
+                      <span>+🪙 {addedPowerBonus} G</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex justify-between items-center pt-1 border-t border-slate-800 text-xs font-bold">
+                  <span className="text-amber-200">合計売却査定額:</span>
+                  <span className="text-amber-300 text-sm font-black">🪙 {sellPrice} G</span>
+                </div>
+              </div>
+
+              {/* 宝石スロット (武器のみ) */}
+              {compiled.type === 'weapon' && (
+                <div className="bg-slate-950 p-3 rounded border border-slate-800 mb-3">
+                  <h4 className="text-xs font-bold text-emerald-300 mb-2 border-b border-slate-800 pb-1 flex items-center justify-between">
+                    <span>💎 宝石スロット ({detailPlayerItem.slottedGems?.length || 0}/{detailPlayerItem.unlockedSockets || 0})</span>
+                  </h4>
+                  
+                  <div className="space-y-2 mb-3">
+                    {Array.from({ length: Math.max(detailPlayerItem.unlockedSockets || 0, 1) }).map((_, idx) => {
+                      if (idx >= (detailPlayerItem.unlockedSockets || 0)) return null;
+                      const gemId = detailPlayerItem.slottedGems?.[idx];
+                      const gem = gemId ? ITEMS[gemId] : null;
+                      return (
+                        <div key={idx} className="flex items-center gap-2 p-2 bg-slate-900 border border-slate-800 rounded">
+                          <div className="w-6 h-6 rounded bg-slate-950 border border-slate-700 flex items-center justify-center flex-shrink-0">
+                            {gem ? '💎' : <span className="text-[10px] text-slate-600">空</span>}
+                          </div>
+                          <div className="flex-1 text-[10px]">
+                            {gem ? (
+                              <>
+                                <div className="font-bold text-slate-200">{gem.name}</div>
+                                <div className="text-sky-300">{gem.effect?.description}</div>
+                              </>
+                            ) : (
+                              <div className="text-slate-500">空きスロット</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {(detailPlayerItem.unlockedSockets || 0) === 0 && (
+                      <div className="text-[10px] text-slate-500 text-center py-2">
+                        スロットが空いていません。穴開けを行ってください。
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    {/* 穴開けボタン */}
+                    {(detailPlayerItem.unlockedSockets || 0) < 3 && (
+                      <button
+                        onClick={() => {
+                          if (onOpenSocket) onOpenSocket(detailPlayerItem.uid);
+                          setDetailPlayerItem(null);
+                        }}
+                        disabled={detailPlayerItem.isLocked || isQuestActive || gold < 5000 * ((detailPlayerItem.unlockedSockets || 0) + 1)}
+                        className="pixel-btn text-[10px] w-full !bg-slate-800 active disabled:opacity-40"
+                      >
+                        ⛏️ 穴を開ける (🪙 {5000 * ((detailPlayerItem.unlockedSockets || 0) + 1)} G / 成功率 {Math.floor((0.5 - ((detailPlayerItem.unlockedSockets || 0) * 0.15) + (job === 'artisan' ? 0.3 : 0)) * 100)}%)
+                      </button>
+                    )}
+                    
+                    {/* 宝石をはめるセレクト (空きスロットがある場合のみ表示) */}
+                    {(detailPlayerItem.unlockedSockets || 0) > (detailPlayerItem.slottedGems?.length || 0) && (
+                      <div className="flex gap-2">
+                        <select 
+                          id="gem-select"
+                          className="pixel-input text-[10px] flex-1 !p-1 bg-slate-900 border border-slate-700 text-slate-300"
+                        >
+                          <option value="">宝石を選択...</option>
+                          {inventory.filter(i => ITEMS[i.baseId]?.type === 'gem' && !i.isLocked).map(i => (
+                            <option key={i.uid} value={i.uid}>{ITEMS[i.baseId].name}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => {
+                            const select = document.getElementById('gem-select') as HTMLSelectElement;
+                            if (select && select.value && onInsertGem) {
+                              onInsertGem(detailPlayerItem.uid, select.value);
+                              setDetailPlayerItem(null);
+                            }
+                          }}
+                          disabled={detailPlayerItem.isLocked || isQuestActive}
+                          className="pixel-btn text-[10px] !py-1 !bg-emerald-900 !text-emerald-100 !border-emerald-600 active disabled:opacity-40"
+                        >
+                          はめ込む
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 装備用アクションボタン */}
+              <div className="flex flex-col gap-2">
+                {isCursedDetail && (
+                  <button
+                    onClick={() => {
+                      setUncurseConfirmItem({ item: detailPlayerItem, gameItem: compiled, cost: uncurseDetailCost });
+                    }}
+                    disabled={gold < uncurseDetailCost || isQuestActive}
+                    className="pixel-btn text-xs w-full !bg-purple-900 !text-purple-100 !border-purple-400 font-bold py-2 active disabled:opacity-40"
+                  >
+                    ✝️ 呪いを解除（解呪）する (費用: 🪙 {uncurseDetailCost.toLocaleString()} G)
+                  </button>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      onEquip(statSlot, compiled.id);
+                      setDetailPlayerItem(null);
+                    }}
+                    disabled={isStatEq || isQuestActive}
+                    className={`pixel-btn text-xs flex-1 ${isStatEq ? 'active !border-emerald-400 !text-emerald-300' : ''}`}
+                  >
+                    {isStatEq ? '能力: 装備中' : '能力を装備'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      onEquip(appSlot, detailPlayerItem.baseId);
+                      setDetailPlayerItem(null);
+                    }}
+                    disabled={isAppEq || isQuestActive}
+                    className={`pixel-btn text-xs flex-1 ${isAppEq ? 'active !border-purple-400 !text-purple-300' : ''}`}
+                  >
+                    {isAppEq ? '見た目: 装備中' : '見た目を装備'}
+                  </button>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      if (onSellItem) onSellItem(detailPlayerItem.uid, sellPrice);
+                      setDetailPlayerItem(null);
+                    }}
+                    disabled={isStatEq || isQuestActive || detailPlayerItem.isLocked}
+                    className="pixel-btn text-xs flex-1 !border-amber-400 disabled:opacity-40"
+                  >
+                    {isStatEq ? '装備中不可' : detailPlayerItem.isLocked ? '🔒 ロック中' : `💰 🪙${sellPrice}G で売却`}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setDismantleConfirmItem({ item: detailPlayerItem, gameItem: baseItem });
+                    }}
+                    disabled={isStatEq || isQuestActive || detailPlayerItem.isLocked}
+                    className="pixel-btn text-xs flex-1 !bg-slate-800 !text-slate-300 hover:!bg-slate-700 disabled:opacity-40"
+                  >
+                    {isStatEq ? '装備中不可' : detailPlayerItem.isLocked ? '🔒 ロック中' : '🔨 分解する'}
+                  </button>
+                </div>
+
+                <div className="flex gap-2 flex-wrap">
+                  {guildName && !detailPlayerItem.engraving && onEngraveItem && (
+                    <button 
+                      onClick={() => {
+                        if (confirm(`「${compiled.name}」にギルド名「${guildName}」を刻印しますか？`)) {
+                          onEngraveItem(detailPlayerItem.uid, guildName);
+                          setDetailPlayerItem(null);
+                        }
+                      }}
+                      className="pixel-btn text-xs flex-1 min-w-[40%] !bg-indigo-700 !border-indigo-500 hover:!bg-indigo-600"
+                    >
+                      🛡️ ギルド刻印
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onToggleLock && onToggleLock(detailPlayerItem.uid)}
+                    className="pixel-btn text-xs flex-1 !bg-slate-800 !border-slate-600"
+                  >
+                    {detailPlayerItem.isLocked ? '🔒 ロック解除' : '🔓 ロックする'}
+                  </button>
+                  <button
+                    onClick={() => setDetailPlayerItem(null)}
+                    className="pixel-btn text-xs flex-1 !bg-slate-800 !text-slate-300 !border-slate-600"
+                  >
+                    閉じる
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
   };
 
-
-  const renderMaterialCard = (pItems) => {
+  const renderMaterialCard = (pItems: PlayerItem[]) => {
     if (!pItems || pItems.length === 0) return null;
     const pItem = pItems[0];
     const count = pItems.length;
@@ -1439,6 +1617,8 @@ export const Inventory: React.FC<InventoryProps> = ({
     if (!baseMat) return null;
     const isChest = baseMat.type === 'chest';
     const isConsumable = baseMat.type === 'consumable';
+    const isPackedBox = !!(pItem.packedItems && pItem.packedItems.length > 0);
+    const isEmptyBox = pItem.baseId.startsWith('c_empty_box_') && !isPackedBox;
     const sellPrice = calculateSellPrice(pItem, job);
     
     const selectedCount = pItems.filter(i => selectedSellUids.includes(i.uid)).length;
@@ -1450,31 +1630,27 @@ export const Inventory: React.FC<InventoryProps> = ({
         onClick={() => {
           if (batchSellMode && canSelectForSell) {
             if (selectedCount === count) {
-               const unselected = pItems.find(i => !selectedSellUids.includes(i.uid));
-               if (unselected) toggleSelectSell(unselected.uid);
-               else pItems.forEach(i => toggleSelectSell(i.uid)); // toggle all off? No, toggleSelectSell just toggles. If we want to deselect all: actually it's easier to just let user click to select one by one.
-               // Let's just do: toggle the next unselected, or if all selected, deselect the first one.
-               if (selectedCount === count) {
-                 toggleSelectSell(pItem.uid); // deselect one
-               }
+              pItems.forEach(i => {
+                if (selectedSellUids.includes(i.uid)) toggleSelectSell(i.uid);
+              });
             } else {
-               const unselected = pItems.find(i => !selectedSellUids.includes(i.uid));
-               if (unselected) toggleSelectSell(unselected.uid);
+              const unselected = pItems.find(i => !selectedSellUids.includes(i.uid));
+              if (unselected) toggleSelectSell(unselected.uid);
             }
           } else {
             setDetailPlayerItem(pItem);
           }
         }}
         className={`pixel-panel flex flex-col gap-2 bg-slate-900/90 border-2 ${
-          isChest ? 'border-amber-500/70 bg-slate-900/95' : 'border-slate-700'
-        } ${batchSellMode ? (canSelectForSell ? 'cursor-pointer hover:border-amber-400' : 'opacity-60 cursor-not-allowed') : ''} ${
+          isChest ? 'border-amber-500/80 bg-slate-900/95 hover:border-amber-400' : isPackedBox ? 'border-sky-500/80 bg-slate-900/95' : 'border-slate-700'
+        } ${batchSellMode ? (canSelectForSell ? 'cursor-pointer hover:border-amber-400' : 'opacity-60 cursor-not-allowed') : 'cursor-pointer hover:border-slate-500'} ${
           selectedCount > 0 ? '!border-amber-400 !bg-amber-950/60 ring-2 ring-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.4)]' : ''
         }`}
       >
-        <div className="flex items-center gap-2">
-          <div className="w-10 h-10 flex items-center justify-center bg-slate-950 border border-slate-700 rounded shadow-inner flex-shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="w-11 h-11 flex items-center justify-center bg-slate-950 border border-slate-700 rounded shadow-inner flex-shrink-0 relative">
             {pItem.isLocked && (
-              <div className="absolute -top-1 -right-1 z-10 bg-slate-900 rounded-full border border-slate-700 p-0.5" title="ロック中">
+              <div className="absolute -top-1 -right-1 z-10 bg-slate-900 rounded-full border border-slate-700 p-0.5 text-[10px]" title="ロック中">
                 🔒
               </div>
             )}
@@ -1482,17 +1658,33 @@ export const Inventory: React.FC<InventoryProps> = ({
               <span className="text-2xl select-none">
                 {baseMat.name.includes('伝説') ? '👑' : baseMat.name.includes('金') ? '🧰' : baseMat.name.includes('銀') ? '🎁' : '📦'}
               </span>
+            ) : isPackedBox ? (
+              <span className="text-2xl select-none">📦</span>
             ) : isConsumable ? (
               <span className="text-2xl select-none">📜</span>
             ) : (
               <ItemIcon item={{ ...baseMat, id: pItem.baseId }} />
             )}
           </div>
+
           <div className="flex-1 min-w-0">
-            <span className="text-sm font-bold truncate block" style={{ color: baseMat.color }}>{baseMat.name}{count > 1 ? ` x${count}` : ""}</span>
-            <div className="text-[10px] text-slate-400">
-              売却価格: <span className="text-amber-300 font-bold">🪙 {sellPrice} G</span>
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-sm font-bold truncate block" style={{ color: baseMat.color }}>
+                {isPackedBox ? `📦 ${baseMat.name} (梱包済)` : baseMat.name}
+                {!isPackedBox && count > 1 ? ` x${count}` : ''}
+              </span>
             </div>
+
+            <div className="text-[10px] text-slate-400 flex items-center justify-between gap-2 mt-0.5">
+              {isPackedBox ? (
+                <span className="text-sky-300 font-bold">🎁 {pItem.packedItems!.length}個 封入</span>
+              ) : isEmptyBox ? (
+                <span className="text-slate-400">空の箱（梱包可能）</span>
+              ) : (
+                <span>売却: <span className="text-amber-300 font-bold">🪙 {sellPrice} G</span></span>
+              )}
+            </div>
+
             {batchSellMode && selectedCount > 0 && (
               <div className="text-[10px] text-amber-400 font-bold mt-1 bg-amber-950/50 px-1 rounded inline-block">
                 売却選択中: {selectedCount} 個
@@ -1500,6 +1692,54 @@ export const Inventory: React.FC<InventoryProps> = ({
             )}
           </div>
         </div>
+
+        {/* クイックアクションボタン (まとめ売りモード以外で表示) */}
+        {!batchSellMode && (
+          <div className="pt-1 border-t border-slate-800/80 flex gap-2">
+            {isChest && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onOpenChest) onOpenChest(pItem);
+                }}
+                disabled={isQuestActive}
+                className="pixel-btn text-xs !py-1 w-full !bg-amber-600 hover:!bg-amber-500 !text-white font-bold"
+              >
+                🎁 開封する
+              </button>
+            )}
+            {isPackedBox && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onOpenChest) onOpenChest(pItem);
+                }}
+                disabled={isQuestActive}
+                className="pixel-btn text-xs !py-1 w-full !bg-sky-600 hover:!bg-sky-500 !text-white font-bold"
+              >
+                🎁 中身を取り出す ({pItem.packedItems!.length}個)
+              </button>
+            )}
+            {isEmptyBox && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPackBoxItem(pItem);
+                  setSelectedPackItemUids([]);
+                }}
+                disabled={isQuestActive}
+                className="pixel-btn text-xs !py-1 w-full !bg-amber-700 hover:!bg-amber-600 !text-amber-100 font-bold"
+              >
+                📦 アイテムを詰める
+              </button>
+            )}
+            {!isChest && !isPackedBox && !isEmptyBox && (
+              <div className="text-[10px] text-slate-500 text-center w-full py-0.5">
+                タップして詳細 / 売却
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   };

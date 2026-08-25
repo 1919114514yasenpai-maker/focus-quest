@@ -18,6 +18,7 @@ interface HeroCanvasProps {
   onAttackMonster: (damage: number, isCrit: boolean, lifestealHeal: number) => void;
   onMonsterDefeated: (monster: Monster) => void;
   onPlayerTakeDamage: (damage: number) => void;
+  focusAnimationsEnabled?: boolean;
 }
 
 interface Particle {
@@ -64,6 +65,7 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
   onAttackMonster,
   onMonsterDefeated,
   onPlayerTakeDamage,
+  focusAnimationsEnabled = true,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const effectiveJob: JobType = (job || 'balanced') as JobType;
@@ -121,6 +123,7 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
     onAttackMonster,
     onMonsterDefeated,
     onPlayerTakeDamage,
+    focusAnimationsEnabled,
   });
 
   useEffect(() => {
@@ -132,8 +135,9 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       onAttackMonster,
       onMonsterDefeated,
       onPlayerTakeDamage,
+      focusAnimationsEnabled,
     };
-  }, [isFocusing, isAsleep, monster, combatStats, onAttackMonster, onMonsterDefeated, onPlayerTakeDamage]);
+  }, [isFocusing, isAsleep, monster, combatStats, onAttackMonster, onMonsterDefeated, onPlayerTakeDamage, focusAnimationsEnabled]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -224,6 +228,7 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         onAttackMonster,
         onMonsterDefeated,
         onPlayerTakeDamage,
+        focusAnimationsEnabled,
       } = propsRef.current;
 
       const groundY = canvas.height - 70;
@@ -239,6 +244,106 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const scale = 4;
       const isRunning = isFocusing && !isAsleep;
+
+      // Fast combat logic reading precomputed stats
+      if (isRunning) {
+        if (enemyX > heroX + 60) {
+          enemyX -= 3;
+        } else {
+          enemyX = heroX + 60;
+        }
+
+        if (cStats.enemySlowRate > 0 && enemyX <= heroX + 80 && currentEnemyHp > 0) {
+          if (elapsed % 15 === 0) {
+            spawnParticles(
+              enemyX + 20 + (Math.random() - 0.5) * 20,
+              heroY - 30 + (Math.random() - 0.5) * 20,
+              '#22c55e',
+              2
+            );
+          }
+          if (elapsed % 90 === 0) {
+            addFloatingText(`🕸️ 攻撃速度-${Math.round(cStats.enemySlowRate * 100)}%`, enemyX, heroY - 70, '#4ade80');
+          }
+        }
+
+        const attackCycle = (elapsed % 30);
+        // Hero Attack
+        if (attackCycle === 22 && enemyX <= heroX + 65) {
+          enemyHitTimer = 10;
+          slashTimer = 12;
+
+          const isCrit = Math.random() < Math.max(0.01, 0.1 + cStats.critChance);
+          const rawDmg = 12 + cStats.weaponPower * 5 + Math.floor(Math.random() * 8);
+          const baseDmg = Math.floor(rawDmg * cStats.dmgMult) + cStats.elementalDamage;
+          const damage = isCrit ? Math.floor(baseDmg * 2.2) : baseDmg;
+          const lifestealHeal = cStats.lifesteal > 0 ? Math.floor(damage * cStats.lifesteal) : 0;
+
+          currentEnemyHp = Math.max(0, currentEnemyHp - damage);
+
+          const dmgColor = cStats.elementalDamage > 0 && cStats.elementalType !== 'none'
+            ? (TYPE_COLORS[cStats.elementalType] || '#fbbf24')
+            : '#fbbf24';
+
+          spawnParticles(enemyX + 20, heroY - 40, isCrit ? '#f43f5e' : dmgColor, isCrit ? 16 : 10);
+          addFloatingText(isCrit ? `CRITICAL! -${damage}` : `-${damage}`, enemyX + 10, heroY - 60, isCrit ? '#f43f5e' : dmgColor);
+
+          if (lifestealHeal > 0) {
+            addFloatingText(`+${lifestealHeal} HP`, heroX - 10, heroY - 65, '#22c55e');
+          }
+
+          onAttackMonster(damage, isCrit, lifestealHeal);
+
+          if (currentEnemyHp <= 0) {
+            const finalXp = Math.max(1, Math.floor(currentMonster.xpReward * cStats.xpMult));
+            const finalGold = Math.max(1, Math.floor(currentMonster.goldReward * cStats.goldMult));
+
+            spawnParticles(enemyX + 20, heroY - 40, '#a855f7', 25);
+            addFloatingText('討伐成功!', enemyX, heroY - 80, '#38bdf8');
+            addFloatingText(`+${finalXp} EXP`, heroX, heroY - 80, '#38bdf8');
+            addFloatingText(
+              cStats.goldMult > 1 
+                ? `+${finalGold} G (+${Math.round((cStats.goldMult - 1) * 100)}%)` 
+                : `+${finalGold} G`, 
+              heroX + 20, 
+              heroY - 95, 
+              '#f59e0b'
+            );
+
+            onMonsterDefeated(currentMonster);
+            enemyX = canvas.width + 100;
+          }
+        }
+
+        // Monster Attack
+        if (elapsed % cStats.monsterAttackInterval === 0 && enemyX <= heroX + 65 && currentEnemyHp > 0) {
+          const rawMonsterAtk = currentMonster.attack;
+          const netDamage = Math.max(1, rawMonsterAtk - Math.floor(cStats.armorPower * 0.8));
+          playerHitTimer = 12;
+          screenShake = 6;
+          spawnParticles(heroX, heroY - 30, '#ef4444', 8);
+          addFloatingText(`-${netDamage}`, heroX - 10, heroY - 50, '#ef4444');
+          onPlayerTakeDamage(netDamage);
+        }
+      } else {
+        enemyX = canvas.width + 100;
+      }
+
+      const shouldAnimate = !isFocusing || focusAnimationsEnabled;
+
+      if (!shouldAnimate) {
+        // Just draw a static dark background when disabled
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.fillStyle = '#64748b';
+        ctx.font = '14px "DotGothic16", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('🔋 省電力・アニメーションオフモード 🔋', canvas.width / 2, canvas.height / 2);
+        
+        animationFrameId = requestAnimationFrame(draw);
+        return;
+      }
 
       ctx.save();
       if (screenShake > 0) {
@@ -295,91 +400,6 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       glow.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = glow;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // Fast combat logic reading precomputed stats
-      if (isRunning) {
-        if (enemyX > heroX + 60) {
-          enemyX -= 3;
-        } else {
-          enemyX = heroX + 60;
-        }
-
-        if (cStats.enemySlowRate > 0 && enemyX <= heroX + 80 && currentEnemyHp > 0) {
-          if (elapsed % 15 === 0) {
-            spawnParticles(
-              enemyX + 20 + (Math.random() - 0.5) * 20,
-              heroY - 30 + (Math.random() - 0.5) * 20,
-              '#22c55e',
-              2
-            );
-          }
-          if (elapsed % 90 === 0) {
-            addFloatingText(`🕸️ 攻撃速度-${Math.round(cStats.enemySlowRate * 100)}%`, enemyX, heroY - 70, '#4ade80');
-          }
-        }
-
-        // Hero Attack
-        if (attackCycle === 22 && enemyX <= heroX + 65) {
-          enemyHitTimer = 10;
-          slashTimer = 12;
-
-          const isCrit = Math.random() < Math.max(0.01, 0.1 + cStats.critChance);
-          const rawDmg = 12 + cStats.weaponPower * 5 + Math.floor(Math.random() * 8);
-          const baseDmg = Math.floor(rawDmg * cStats.dmgMult) + cStats.elementalDamage;
-          const damage = isCrit ? Math.floor(baseDmg * 2.2) : baseDmg;
-          const lifestealHeal = cStats.lifesteal > 0 ? Math.floor(damage * cStats.lifesteal) : 0;
-
-          currentEnemyHp = Math.max(0, currentEnemyHp - damage);
-
-          const dmgColor = cStats.elementalDamage > 0 && cStats.elementalType !== 'none'
-            ? (TYPE_COLORS[cStats.elementalType] || '#fbbf24')
-            : '#fbbf24';
-
-          spawnParticles(enemyX + 20, heroY - 40, isCrit ? '#f43f5e' : dmgColor, isCrit ? 16 : 10);
-          addFloatingText(isCrit ? `CRITICAL! -${damage}` : `-${damage}`, enemyX + 10, heroY - 60, isCrit ? '#f43f5e' : dmgColor);
-
-          if (lifestealHeal > 0) {
-            addFloatingText(`+${lifestealHeal} HP`, heroX - 10, heroY - 65, '#22c55e');
-          }
-
-          onAttackMonster(damage, isCrit, lifestealHeal);
-
-          if (currentEnemyHp <= 0) {
-            const finalXp = Math.max(1, Math.floor(currentMonster.xpReward * cStats.xpMult));
-            const finalGold = Math.max(1, Math.floor(currentMonster.goldReward * cStats.goldMult));
-
-            spawnParticles(enemyX + 20, heroY - 40, '#a855f7', 25);
-            addFloatingText('討伐成功!', enemyX, heroY - 80, '#38bdf8');
-            addFloatingText(`+${finalXp} EXP`, heroX, heroY - 80, '#38bdf8');
-            addFloatingText(
-              cStats.goldMult > 1 
-                ? `+${finalGold} G (+${Math.round((cStats.goldMult - 1) * 100)}%)` 
-                : `+${finalGold} G`, 
-              heroX + 20, 
-              heroY - 95, 
-              '#f59e0b'
-            );
-
-            onMonsterDefeated(currentMonster);
-            enemyX = canvas.width + 100;
-          }
-        }
-
-        // Monster Attack
-        if (elapsed % cStats.monsterAttackInterval === 0 && enemyX <= heroX + 65 && currentEnemyHp > 0) {
-          const rawMonsterAtk = currentMonster.attack;
-          const netDamage = Math.max(1, rawMonsterAtk - Math.floor(cStats.armorPower * 0.8));
-
-          playerHitTimer = 12;
-          screenShake = 6;
-          spawnParticles(heroX, heroY - 30, '#ef4444', 8);
-          addFloatingText(`-${netDamage}`, heroX - 10, heroY - 50, '#ef4444');
-
-          onPlayerTakeDamage(netDamage);
-        }
-      } else {
-        enemyX = canvas.width + 100;
-      }
 
       // Draw Monster
       if (enemyX < canvas.width + 50) {

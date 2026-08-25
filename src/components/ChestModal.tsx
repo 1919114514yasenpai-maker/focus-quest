@@ -21,6 +21,8 @@ export const ChestModal: React.FC<ChestModalProps> = ({ reward, focusMinutes, on
     }, 1200);
   };
 
+  const chestTitle = reward.chestName || '宝箱';
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
       <div className="bg-slate-900 border-4 border-amber-500/80 rounded-xl max-w-md w-full p-6 text-slate-100 shadow-2xl flex flex-col items-center text-center relative overflow-hidden">
@@ -31,13 +33,13 @@ export const ChestModal: React.FC<ChestModalProps> = ({ reward, focusMinutes, on
           {focusMinutes ? `🎉 ${focusMinutes}分間のクエスト完遂！` : '🎁 宝箱開封'}
         </div>
         <h2 className="text-2xl font-black text-amber-300 drop-shadow mb-4">
-          {reward.chestName}を獲得！
+          {chestTitle}を獲得！
         </h2>
 
         {!isOpened ? (
           <div className="my-6 flex flex-col items-center gap-6 w-full">
             <div className={`text-8xl select-none transition-transform duration-300 ${isAnimating ? 'animate-bounce scale-110' : 'hover:scale-105'}`}>
-              {reward.chestName.includes('伝説') ? '👑' : reward.chestName.includes('金') ? '🧰' : reward.chestName.includes('銀') ? '🎁' : '📦'}
+              {chestTitle.includes('伝説') ? '👑' : chestTitle.includes('金') ? '🧰' : chestTitle.includes('銀') ? '🎁' : '📦'}
             </div>
             <p className="text-slate-300 text-sm">
               クエストお疲れ様でした！宝箱を開けて成果を受け取りましょう！

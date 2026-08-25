@@ -104,6 +104,13 @@ export async function testConnection() {
 }
 
 const googleProvider = new GoogleAuthProvider();
+googleProvider.addScope('https://www.googleapis.com/auth/tasks');
+
+// Manage the Google access token in memory
+let cachedAccessToken: string | null = null;
+
+export const getAccessToken = () => cachedAccessToken;
+
 // Note: Do not set prompt: 'select_account' so users stay signed in seamlessly without re-prompting every time
 
 export async function signInWithGoogle() {
@@ -112,6 +119,13 @@ export async function signInWithGoogle() {
       await setPersistence(auth, browserLocalPersistence).catch(() => {});
     }
     const result = await signInWithPopup(auth, googleProvider);
+    
+    // Cache the access token
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (credential?.accessToken) {
+      cachedAccessToken = credential.accessToken;
+    }
+    
     return result.user;
   } catch (error: any) {
     console.error("Google Sign In (popup) error:", error);
@@ -135,6 +149,12 @@ export async function signInWithGoogle() {
 export async function checkRedirectAuthResult() {
   try {
     const result = await getRedirectResult(auth);
+    if (result) {
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        cachedAccessToken = credential.accessToken;
+      }
+    }
     return result ? result.user : null;
   } catch (error) {
     console.error("Redirect auth check:", error);
@@ -143,5 +163,6 @@ export async function checkRedirectAuthResult() {
 }
 
 export async function logoutUser() {
+  cachedAccessToken = null;
   return await signOut(auth);
 }
