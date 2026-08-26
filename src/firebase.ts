@@ -11,23 +11,16 @@ import {
   indexedDBLocalPersistence
 } from 'firebase/auth';
 import { 
-  initializeFirestore, 
+  getFirestore, 
   doc, 
-  getDocFromServer,
-  persistentLocalCache,
-  persistentMultipleTabManager
+  getDocFromServer
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with experimentalForceLongPolling to bypass WebChannel / gRPC network blocks (common on MDM / Safari)
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
-}, firebaseConfig.firestoreDatabaseId);
+// Initialize Firestore with default settings (more stable across iPad/Safari)
+export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
 
 export const auth = getAuth(app);
 

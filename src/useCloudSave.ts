@@ -12,10 +12,10 @@ import {
   OperationType 
 } from './firebase';
 import { SaveData } from './types';
-import { sanitizeSaveData } from './saveManager';
+import { compressSaveDataForCloud, decompressCloudSave } from './compression';
 
 // Timeout promise helper to prevent hanging when Firestore endpoint is blocked by MDM/firewall
-function withTimeout<T>(promise: Promise<T>, timeoutMs = 12000, errorMsg = 'タイムアウトしました'): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, timeoutMs = 10000, errorMsg = 'タイムアウトしました'): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) => setTimeout(() => reject(new Error(errorMsg)), timeoutMs))
@@ -53,11 +53,6 @@ export function useCloudSave(
     });
   }, []);
 
-  // Helper to remove any undefined fields before sending to Firestore
-  const cleanForFirestore = (obj: any): any => {
-    return JSON.parse(JSON.stringify(obj, (_, value) => (value === undefined ? null : value)));
-  };
-
   // Listen to auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -74,27 +69,23 @@ export function useCloudSave(
           
           const snapshot = await withTimeout(
             getDoc(saveDocRef), 
-            15000, 
+            10000, 
             'Firestoreサーバーへの接続がタイムアウトしました。'
           );
 
           if (snapshot.exists()) {
             const data = snapshot.data();
-            const sanitized = sanitizeSaveData(data);
+            // 自動解凍（新旧両形式に対応）
+            const sanitized = decompressCloudSave(data);
             onLoadedRef.current(sanitized);
             setLastSyncedAt(data.updatedAt ? new Date(data.updatedAt).toLocaleTimeString() : 'クラウドから同期済み');
           } else {
-            // First time user logged in: upload local save data to cloud
+            // First time user logged in: upload compressed local save data to cloud
             const currentData = currentSaveRef.current;
-            const payload = cleanForFirestore({
-              stats: currentData.stats,
-              equipment: currentData.equipment,
-              inventory: currentData.inventory,
-              updatedAt: new Date().toISOString(),
-            });
+            const compressedPayload = compressSaveDataForCloud(currentData);
             await withTimeout(
-              setDoc(saveDocRef, payload),
-              15000,
+              setDoc(saveDocRef, compressedPayload),
+              10000,
               'クラウドへのデータ保存がタイムアウトしました。'
             );
             setLastSyncedAt(new Date().toLocaleTimeString());
@@ -103,7 +94,7 @@ export function useCloudSave(
           console.error("Cloud sync load error:", err);
           const msg = err?.message || '';
           if (msg.includes('タイムアウト') || msg.includes('timeout')) {
-            setSyncError("⚠️ 通信タイムアウト：MDM・ネットワーク制限または電波状況をご確認ください。「引継ぎコード」での移行も可能です。");
+            setSyncError("⚠️ 通信タイムアウト：ネットワーク制限または電波状況をご確認ください。「引継ぎコード」での移行も可能です。");
           } else if (msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
             setSyncError("⚠️ Firestore権限エラー：しばらく待ってから「☁️ 今すぐ保存」をお試しください。");
           } else {
@@ -125,7 +116,7 @@ export function useCloudSave(
     return () => unsubscribe();
   }, []);
 
-  // Sync to cloud
+  // Sync to cloud with high-efficiency compression
   const saveToCloud = useCallback(async (dataToSave: SaveData) => {
     const targetUser = user || auth.currentUser;
     if (!targetUser) return;
@@ -134,24 +125,21 @@ export function useCloudSave(
       setSyncing(true);
       setSyncError(null);
       const saveDocRef = doc(db, 'users', targetUser.uid, 'saves', 'default');
-      const now = new Date().toISOString();
-      const payload = cleanForFirestore({
-        stats: dataToSave.stats,
-        equipment: dataToSave.equipment,
-        inventory: dataToSave.inventory,
-        updatedAt: now,
-      });
+      
+      // 高速圧縮ペイロードを生成 (従来の1/10〜1/20サイズに縮小)
+      const compressedPayload = compressSaveDataForCloud(dataToSave);
+
       await withTimeout(
-        setDoc(saveDocRef, payload),
-        15000,
+        setDoc(saveDocRef, compressedPayload),
+        10000,
         'クラウド同期がタイムアウトしました。'
       );
-      setLastSyncedAt(new Date(now).toLocaleTimeString());
+      setLastSyncedAt(new Date(compressedPayload.updatedAt).toLocaleTimeString());
     } catch (err: any) {
       console.error("Cloud save error:", err);
       const msg = err?.message || '';
       if (msg.includes('タイムアウト') || msg.includes('timeout')) {
-        setSyncError("⚠️ クラウド保存がタイムアウトしました。MDM・学校等のネットワーク制限をご確認ください。");
+        setSyncError("⚠️ クラウド保存がタイムアウトしました。電波環境や通信制限をご確認ください。");
       } else if (msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
         setSyncError("⚠️ Firestoreの書き込み権限エラーが発生しました。");
       } else {
@@ -178,13 +166,13 @@ export function useCloudSave(
       const saveDocRef = doc(db, 'users', targetUser.uid, 'saves', 'default');
       const snapshot = await withTimeout(
         getDoc(saveDocRef), 
-        15000, 
+        10000, 
         'クラウドからのデータ読み込みがタイムアウトしました。'
       );
 
       if (snapshot.exists()) {
         const data = snapshot.data();
-        const sanitized = sanitizeSaveData(data);
+        const sanitized = decompressCloudSave(data);
         onLoadedRef.current(sanitized);
         setLastSyncedAt(data.updatedAt ? new Date(data.updatedAt).toLocaleTimeString() : 'クラウドから同期済み');
       } else {

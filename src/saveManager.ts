@@ -1,5 +1,6 @@
 import { SaveData, PlayerStats, EquipmentState, PlayerItem } from './types';
 import { INITIAL_INVENTORY, ITEMS, generateUid } from './gameData';
+import { parseAnySaveText } from './compression';
 
 export const CURRENT_SAVE_KEY = 'focus_quest_save_v3';
 export const LEGACY_SAVE_KEYS = [
@@ -9,12 +10,14 @@ export const LEGACY_SAVE_KEYS = [
 ];
 
 export function parseSaveText(input: string): any {
-  let cleaned = input.trim();
-  // Remove markdown code blocks if present (e.g. ```json ... ```)
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  // Normalize smart quotes if any
-  cleaned = cleaned.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
-  return JSON.parse(cleaned);
+  try {
+    return parseAnySaveText(input);
+  } catch {
+    let cleaned = input.trim();
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    cleaned = cleaned.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+    return JSON.parse(cleaned);
+  }
 }
 
 export function sanitizeSaveData(rawData: any): SaveData {

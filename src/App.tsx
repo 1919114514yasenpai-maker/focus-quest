@@ -1356,18 +1356,52 @@ export default function App() {
               )}
               {(() => {
                 const timePassed = focusMinutes * 60 - timeLeft;
-                const canCancel = timePassed < 10;
+                const isFreeCancel = timePassed < 10;
+                // 「やばい量」のコイン計算: レベル×500G + 所持金の30% (最低 3,000G)
+                const escapeCost = Math.max(3000, Math.floor(stats.gold * 0.3) + stats.level * 500);
+                const canAffordPaidEscape = stats.gold >= escapeCost;
+
+                if (isFreeCancel) {
+                  return (
+                    <button
+                      onClick={handleStop}
+                      className="pixel-btn text-xs sm:text-sm w-full py-2.5 sm:py-3 font-bold !border-rose-600 !text-rose-300 hover:!bg-rose-950/60"
+                    >
+                      🏃 撤退する (開始10秒以内・無料)
+                    </button>
+                  );
+                }
+
                 return (
                   <button
-                    onClick={handleStop}
-                    disabled={!canCancel}
-                    className={`pixel-btn text-xs sm:text-sm w-full py-2.5 sm:py-3 font-bold ${
-                      canCancel 
-                        ? '!border-rose-600 !text-rose-300 hover:!bg-rose-950/60' 
-                        : '!border-slate-700 !text-slate-500 bg-slate-900 opacity-50 cursor-not-allowed'
+                    onClick={() => {
+                      if (!canAffordPaidEscape) return;
+                      setStats(prev => ({
+                        ...prev,
+                        gold: Math.max(0, prev.gold - escapeCost)
+                      }));
+                      handleStop();
+                      showToast(`💸 大量のコイン 💰${escapeCost.toLocaleString()} G を投げ捨てて敵の目を眩まし、緊急撤退しました！`);
+                    }}
+                    disabled={!canAffordPaidEscape}
+                    className={`pixel-btn text-xs sm:text-sm w-full py-2.5 sm:py-3 font-bold flex items-center justify-center gap-1.5 transition-all ${
+                      canAffordPaidEscape
+                        ? '!border-amber-500 !bg-amber-950/80 !text-amber-200 hover:!bg-amber-900 active:scale-95 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
+                        : '!border-slate-800 !text-slate-500 bg-slate-900/90 opacity-60 cursor-not-allowed'
                     }`}
+                    title={canAffordPaidEscape ? `所持金から 💰${escapeCost.toLocaleString()} G を支払って緊急脱出` : `緊急撤退には 💰${escapeCost.toLocaleString()} G が必要です`}
                   >
-                    {canCancel ? '🏃 撤退する (10秒以内のみ可能)' : '🔒 撤退不可（戦闘中！）'}
+                    {canAffordPaidEscape ? (
+                      <>
+                        <span>💸</span>
+                        <span>金の力で緊急撤退 (💰 {escapeCost.toLocaleString()} G 消費)</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>🔒</span>
+                        <span>撤退不可（緊急脱出に 💰 {escapeCost.toLocaleString()} G 必要）</span>
+                      </>
+                    )}
                   </button>
                 );
               })()}

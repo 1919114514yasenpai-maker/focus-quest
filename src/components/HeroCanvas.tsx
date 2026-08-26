@@ -329,7 +329,7 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         enemyX = canvas.width + 100;
       }
 
-      const shouldAnimate = !isFocusing || focusAnimationsEnabled;
+      const shouldAnimate = focusAnimationsEnabled;
 
       if (!shouldAnimate) {
         // Just draw a static dark background when disabled
