@@ -42,6 +42,15 @@ interface FloatingText {
   maxLife: number;
 }
 
+interface BattleLogEntry {
+  id: number;
+  time: string;
+  text: string;
+  color: string;
+  tag: string;
+  tagColor: string;
+}
+
 const TYPE_COLORS: Record<string, string> = {
   fire: '#ef4444',
   water: '#3b82f6',
@@ -161,6 +170,36 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
     let slashTimer = 0;
 
     let lastMonsterId = monster.id;
+    let lastFocusingState = isFocusing;
+    let lastAsleepState = isAsleep;
+
+    let battleLogs: BattleLogEntry[] = [
+      {
+        id: 1,
+        time: new Date().toLocaleTimeString('ja-JP', { hour12: false }),
+        text: '冒険の準備完了！クエストを開始すると自動戦闘を開始します。',
+        color: '#94a3b8',
+        tag: 'INFO',
+        tagColor: '#64748b'
+      }
+    ];
+    let logIdCounter = 1;
+
+    const addBattleLog = (text: string, color: string, tag = 'BATTLE', tagColor = '#f59e0b') => {
+      if (battleLogs.length >= 25) {
+        battleLogs.shift();
+      }
+      const now = new Date();
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      battleLogs.push({
+        id: ++logIdCounter,
+        time: timeStr,
+        text,
+        color,
+        tag,
+        tagColor,
+      });
+    };
 
     // Responsive canvas dimension sync
     const updateCanvasDimensions = () => {
@@ -235,10 +274,29 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       const heroX = 180;
       const heroY = groundY;
 
+      if (lastFocusingState !== isFocusing) {
+        lastFocusingState = isFocusing;
+        if (isFocusing) {
+          addBattleLog('⚔️ 集中クエスト開始！自動戦闘を開始します', '#38bdf8', 'QUEST', '#0284c7');
+        } else {
+          addBattleLog('☕ クエスト終了。待機中...', '#94a3b8', 'INFO', '#64748b');
+        }
+      }
+
+      if (lastAsleepState !== isAsleep) {
+        lastAsleepState = isAsleep;
+        if (isAsleep && isFocusing) {
+          addBattleLog('💤 勇者が居眠りを始めました（画面に戻ると再開）', '#f43f5e', 'SLEEP', '#e11d48');
+        } else if (!isAsleep && isFocusing) {
+          addBattleLog('✨ 勇者が目を覚まし、戦闘を再開しました！', '#34d399', 'WAKE', '#059669');
+        }
+      }
+
       if (lastMonsterId !== currentMonster.id) {
         lastMonsterId = currentMonster.id;
         currentEnemyHp = currentMonster.maxHp;
         enemyX = canvas.width + 100;
+        addBattleLog(`👾 ${currentMonster.name} が出現！ (HP: ${currentMonster.maxHp} / ATK: ${currentMonster.attack})`, '#38bdf8', 'SPAWN', '#0284c7');
       }
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -288,8 +346,15 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
           spawnParticles(enemyX + 20, heroY - 40, isCrit ? '#f43f5e' : dmgColor, isCrit ? 16 : 10);
           addFloatingText(isCrit ? `CRITICAL! -${damage}` : `-${damage}`, enemyX + 10, heroY - 60, isCrit ? '#f43f5e' : dmgColor);
 
+          if (isCrit) {
+            addBattleLog(`💥 会心の一撃！ ${currentMonster.name} に ${damage} ダメージ！`, '#f43f5e', 'CRIT', '#e11d48');
+          } else {
+            addBattleLog(`⚔️ 勇者の攻撃！ ${currentMonster.name} に ${damage} ダメージ！`, dmgColor, 'ATTACK', '#d97706');
+          }
+
           if (lifestealHeal > 0) {
             addFloatingText(`+${lifestealHeal} HP`, heroX - 10, heroY - 65, '#22c55e');
+            addBattleLog(`🌿 吸血効果！ HP +${lifestealHeal} 回復`, '#22c55e', 'HEAL', '#16a34a');
           }
 
           onAttackMonster(damage, isCrit, lifestealHeal);
@@ -310,6 +375,8 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
               '#f59e0b'
             );
 
+            addBattleLog(`🏆 KILL! ${currentMonster.name} を撃破！ (+${finalXp} EXP, +${finalGold} G)`, '#a855f7', 'KILL', '#9333ea');
+
             onMonsterDefeated(currentMonster);
             enemyX = canvas.width + 100;
           }
@@ -323,6 +390,7 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
           screenShake = 6;
           spawnParticles(heroX, heroY - 30, '#ef4444', 8);
           addFloatingText(`-${netDamage}`, heroX - 10, heroY - 50, '#ef4444');
+          addBattleLog(`💔 ${currentMonster.name} の攻撃！ 勇者は ${netDamage} ダメージを受けた！`, '#ef4444', 'DAMAGE', '#dc2626');
           onPlayerTakeDamage(netDamage);
         }
       } else {
@@ -332,15 +400,117 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       const shouldAnimate = focusAnimationsEnabled;
 
       if (!shouldAnimate) {
-        // Just draw a static dark background when disabled
-        ctx.fillStyle = '#0f172a';
+        // Clear background with rich dark tone
+        ctx.fillStyle = '#080c16';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        ctx.fillStyle = '#64748b';
-        ctx.font = '14px "DotGothic16", monospace';
+
+        // Center Log Box Layout calculation
+        const boxWidth = Math.min(canvas.width - 24, 640);
+        const boxHeight = Math.min(canvas.height - 180, 240);
+        const boxX = Math.max(12, (canvas.width - boxWidth) / 2);
+        const boxY = Math.max(75, (canvas.height - boxHeight) / 2 - 10);
+
+        // Draw outer retro panel
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+
+        // Header
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(boxX, boxY, boxWidth, 30);
+        ctx.strokeStyle = '#475569';
+        ctx.strokeRect(boxX, boxY, boxWidth, 30);
+
+        // Header title
+        ctx.font = 'bold 12px "DotGothic16", monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fbbf24';
+        ctx.fillText('⚡ リアルタイム戦闘ログ (省電力モード)', boxX + 10, boxY + 15);
+
+        // Status Badge
+        const statusText = isRunning ? '⚔️ クエスト実行中' : isAsleep ? '💤 居眠り中' : '☕ 待機中';
+        const statusColor = isRunning ? '#34d399' : isAsleep ? '#f87171' : '#94a3b8';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = statusColor;
+        ctx.fillText(statusText, boxX + boxWidth - 10, boxY + 15);
+
+        // Enemy summary bar inside header
+        let logsStartY = boxY + 38;
+        if (isRunning && currentMonster) {
+          ctx.fillStyle = '#111827';
+          ctx.fillRect(boxX + 6, boxY + 34, boxWidth - 12, 24);
+          ctx.strokeStyle = '#1e293b';
+          ctx.strokeRect(boxX + 6, boxY + 34, boxWidth - 12, 24);
+
+          ctx.textAlign = 'left';
+          ctx.font = '11px "DotGothic16", monospace';
+          ctx.fillStyle = '#e2e8f0';
+          ctx.fillText(`👾 対象: ${currentMonster.name}`, boxX + 12, boxY + 46);
+
+          // Monster HP mini bar
+          const barW = Math.min(160, boxWidth * 0.35);
+          const barX = boxX + boxWidth - barW - 12;
+          const barY = boxY + 40;
+          const hpRatio = Math.max(0, Math.min(1, currentEnemyHp / currentMonster.maxHp));
+
+          ctx.fillStyle = '#334155';
+          ctx.fillRect(barX, barY, barW, 12);
+          ctx.fillStyle = hpRatio > 0.5 ? '#22c55e' : hpRatio > 0.2 ? '#eab308' : '#ef4444';
+          ctx.fillRect(barX, barY, barW * hpRatio, 12);
+          ctx.strokeStyle = '#475569';
+          ctx.strokeRect(barX, barY, barW, 12);
+
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '9px monospace';
+          ctx.fillText(`${currentEnemyHp}/${currentMonster.maxHp}`, barX + barW / 2, barY + 9);
+
+          logsStartY = boxY + 64;
+        }
+
+        // Battle logs listing
+        const availableHeight = boxY + boxHeight - logsStartY - 6;
+        const lineHeight = 20;
+        const maxVisibleLogs = Math.max(1, Math.floor(availableHeight / lineHeight));
+        const visibleLogs = battleLogs.slice(-maxVisibleLogs);
+
+        visibleLogs.forEach((log, index) => {
+          const itemY = logsStartY + index * lineHeight + 10;
+
+          ctx.textAlign = 'left';
+          ctx.font = '10px monospace';
+          // Timestamp
+          ctx.fillStyle = '#64748b';
+          ctx.fillText(`[${log.time}]`, boxX + 10, itemY);
+
+          // Tag
+          ctx.font = 'bold 9px monospace';
+          ctx.fillStyle = log.tagColor;
+          ctx.fillText(`[${log.tag}]`, boxX + 70, itemY);
+
+          // Log Text
+          ctx.font = '11px "DotGothic16", monospace';
+          ctx.fillStyle = log.color;
+          const maxTextW = boxWidth - 145;
+          let displayText = log.text;
+          if (ctx.measureText(displayText).width > maxTextW) {
+            while (displayText.length > 5 && ctx.measureText(displayText + '...').width > maxTextW) {
+              displayText = displayText.slice(0, -1);
+            }
+            displayText += '...';
+          }
+          ctx.fillText(displayText, boxX + 125, itemY);
+        });
+
+        // Bottom hint
+        ctx.font = '10px "DotGothic16", monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('🔋 省電力・アニメーションオフモード 🔋', canvas.width / 2, canvas.height / 2);
-        
+        ctx.fillStyle = '#64748b';
+        ctx.fillText('💡 アニメーションは右下の「⚙️ 設定」からいつでも再開できます', canvas.width / 2, boxY + boxHeight + 18);
+
         animationFrameId = requestAnimationFrame(draw);
         return;
       }

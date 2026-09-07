@@ -11,7 +11,7 @@ import {
   indexedDBLocalPersistence
 } from 'firebase/auth';
 import { 
-  getFirestore, 
+  initializeFirestore, 
   doc, 
   getDocFromServer
 } from 'firebase/firestore';
@@ -19,8 +19,10 @@ import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with default settings (more stable across iPad/Safari)
-export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
+// Fallback to long polling, this fixes network timeouts on restrictive networks and iOS/Safari WebKit where WebSockets/gRPC streams get killed
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true
+}, (firebaseConfig as any).firestoreDatabaseId);
 
 export const auth = getAuth(app);
 

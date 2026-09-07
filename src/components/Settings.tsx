@@ -415,6 +415,19 @@ export const Settings: React.FC<SettingsProps> = ({
               </div>
             )}
 
+            <div className="pt-2 border-t border-slate-800 text-center text-[10px] text-slate-500 space-y-1">
+              <div className="font-bold text-slate-400">Focus-quest-study (Focus Quest)</div>
+              <div className="flex justify-center space-x-3 text-amber-400/80">
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:underline hover:text-amber-300">
+                  プライバシーポリシー
+                </a>
+                <span>•</span>
+                <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:underline hover:text-amber-300">
+                  利用規約
+                </a>
+              </div>
+            </div>
+
             <button onClick={onClose} className="pixel-btn w-full py-2.5 text-xs mt-2 text-slate-400 hover:text-slate-200">
               とじる
             </button>

@@ -1168,6 +1168,7 @@ export default function App() {
           inventory={inventory}
           job={stats.job || 'balanced'}
           hasCurseImmunity={stats.hasCurseImmunity}
+          focusAnimationsEnabled={focusAnimationsEnabled}
         />
       </div>
 
@@ -1514,6 +1515,22 @@ export default function App() {
             )}
           </button>
         </div>
+
+        {/* Global Legal & Branding Footer for Google OAuth Verification */}
+        <footer className="mt-4 pt-2 text-center text-[10px] text-slate-500 space-y-1">
+          <div className="font-bold text-slate-400">
+            Focus-quest-study <span className="font-normal text-slate-500">(Focus Quest)</span>
+          </div>
+          <div className="flex justify-center space-x-4 text-slate-400">
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-amber-400 underline">
+              プライバシーポリシー (Privacy)
+            </a>
+            <span>•</span>
+            <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-amber-400 underline">
+              利用規約 (Terms)
+            </a>
+          </div>
+        </footer>
       </div>
 
       {showJobModal && (
