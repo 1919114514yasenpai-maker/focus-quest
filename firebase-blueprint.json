@@ -5,33 +5,115 @@
       "description": "User's Focus Quest save data including stats, equipment, and inventory",
       "type": "object",
       "properties": {
-        "stats": {
-          "type": "object",
-          "description": "Player stats"
-        },
-        "equipment": {
-          "type": "object",
-          "description": "Equipped items"
-        },
-        "inventory": {
-          "type": "array",
-          "description": "Player inventory items"
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Last save timestamp"
-        }
+        "stats": { "type": "object", "description": "Player stats" },
+        "equipment": { "type": "object", "description": "Equipped items" },
+        "inventory": { "type": "array", "description": "Player inventory items" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last save timestamp" }
       },
       "required": ["stats", "equipment", "inventory", "updatedAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public user profile for rankings and guilds",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string", "maxLength": 50 },
+        "guildId": { "type": "string", "maxLength": 50 },
+        "weeklyFocusTime": { "type": "number" },
+        "weekId": { "type": "string", "maxLength": 20 },
+        "totalFocusTime": { "type": "number" }
+      },
+      "required": ["displayName", "weeklyFocusTime", "weekId", "totalFocusTime"]
+    },
+    "Guild": {
+      "title": "Guild",
+      "description": "Guild/Team for rankings",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 50 },
+        "leaderId": { "type": "string", "maxLength": 50 },
+        "weeklyFocusTime": { "type": "number" },
+        "weekId": { "type": "string", "maxLength": 20 },
+        "memberCount": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "isPrivate": { "type": "boolean" },
+        "inviteCode": { "type": "string", "maxLength": 20 },
+        "electionEndTime": { "type": "number" }
+      },
+      "required": ["name", "leaderId", "weeklyFocusTime", "weekId", "memberCount", "createdAt", "isPrivate", "inviteCode"]
+    },
+    "GuildVote": {
+      "title": "GuildVote",
+      "description": "Vote for new guild leader",
+      "type": "object",
+      "properties": {
+        "candidateId": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["candidateId"]
+    },
+    "GuildShopItem": {
+      "title": "GuildShopItem",
+      "description": "Item listed in guild member shop for player-to-player trading",
+      "type": "object",
+      "properties": {
+        "guildId": { "type": "string", "maxLength": 50 },
+        "sellerId": { "type": "string", "maxLength": 50 },
+        "sellerName": { "type": "string", "maxLength": 50 },
+        "itemData": { "type": "object" },
+        "price": { "type": "number" },
+        "buyerId": { "type": "string", "maxLength": 50 },
+        "buyerName": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "enum": ["active", "sold", "claimed", "canceled"] },
+        "sellerClaimed": { "type": "boolean" },
+        "note": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["guildId", "sellerId", "sellerName", "itemData", "price", "status", "createdAt"]
+    },
+    "MarketItem": {
+      "title": "MarketItem",
+      "description": "Auction listing for an item",
+      "type": "object",
+      "properties": {
+        "sellerId": { "type": "string", "maxLength": 50 },
+        "sellerName": { "type": "string", "maxLength": 50 },
+        "itemData": { "type": "object" },
+        "startingBid": { "type": "number" },
+        "currentBid": { "type": "number" },
+        "highestBidderId": { "type": "string", "maxLength": 50 },
+        "highestBidderName": { "type": "string", "maxLength": 50 },
+        "buyoutPrice": { "type": "number" },
+        "expiresAt": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "sold", "expired", "claimed", "canceled"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["sellerId", "sellerName", "itemData", "startingBid", "currentBid", "expiresAt", "status", "createdAt"]
     }
   },
   "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile"
+    },
     "/users/{userId}/saves/{saveId}": {
-      "schema": {
-        "$ref": "#/entities/UserSave"
-      },
+      "schema": { "$ref": "#/entities/UserSave" },
       "description": "User save game records"
+    },
+    "/guilds/{guildId}": {
+      "schema": { "$ref": "#/entities/Guild" },
+      "description": "Guilds for ranking"
+    },
+    "/guilds/{guildId}/votes/{voterId}": {
+      "schema": { "$ref": "#/entities/GuildVote" },
+      "description": "Votes for guild leader election"
+    },
+    "/guilds/{guildId}/shop/{itemId}": {
+      "schema": { "$ref": "#/entities/GuildShopItem" },
+      "description": "Guild member shop items"
+    },
+    "/market/{itemId}": {
+      "schema": { "$ref": "#/entities/MarketItem" },
+      "description": "Market items/auctions"
     }
   }
 }

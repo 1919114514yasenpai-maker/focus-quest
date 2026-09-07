@@ -1,0 +1,2 @@
+#!/bin/bash
+sed -i 's|{showSettings && (|{showGuildRanking \&\& <GuildRanking onClose={() => setShowGuildRanking(false)} />}\n      {showAuctionHouse \&\& <AuctionHouse onClose={() => setShowAuctionHouse(false)} inventory={inventory} gold={stats.gold} onRefreshGold={(amount) => setStats(s => ({ ...s, gold: Math.max(0, s.gold + amount) }))} onReceiveItem={(item) => setInventory(inv => [...inv, item])} onRemoveItem={(uid) => setInventory(inv => inv.filter(i => i.uid !== uid))} />}\n      {showSettings \&\& (|' src/App.tsx
