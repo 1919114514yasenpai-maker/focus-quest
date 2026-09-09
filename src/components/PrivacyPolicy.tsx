@@ -29,11 +29,6 @@ export const PrivacyPolicy: React.FC = () => {
               Firebase Authenticationを通じたユーザー認証、クラウドセーブデータの紐付け、複数端末間でのセーブデータ同期のために使用します。
             </li>
             <li>
-              <strong className="text-slate-100">Google Tasks API（Google ToDoリストデータ）:</strong>
-              <br />
-              当アプリの「集中クエスト」と利用者のGoogle ToDoリストのタスクを同期し、タスクの取得、完了状態の更新、新規タスク作成をユーザー自身の明示的な操作に基づいて行うためにのみ使用します。
-            </li>
-            <li>
               <strong className="text-slate-100">ゲームプレイデータ（レベル、装備、集中時間、討伐記録など）:</strong>
               <br />
               ゲームの進行状況の保存およびクラウドへのバックアップのために保存します。
@@ -42,34 +37,14 @@ export const PrivacyPolicy: React.FC = () => {
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-lg font-bold text-amber-300">3. Google API ユーザーデータポリシーの遵守 (Limited Use Policy)</h2>
-          <p className="text-sm text-slate-300 leading-relaxed bg-slate-950 p-4 rounded-lg border border-slate-800">
-            当アプリがGoogle APIから受け取った情報の使用および他のアプリへの移転は、
-            <a 
-              href="https://developers.google.com/terms/api-services-user-data-policy" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-amber-400 hover:underline mx-1"
-            >
-              Google API サービスのユーザーデータに関するポリシー
-            </a>
-            （限定使用要件を含む）に準拠します。
-          </p>
-          <ul className="list-disc list-inside text-sm text-slate-300 space-y-1 pl-2">
-            <li>Google Tasksのデータは、ユーザーが画面上で確認・操作する機能の提供にのみ使用され、広告目的やAI/機械学習モデルの訓練に使用されることは一切ありません。</li>
-            <li>Google Tasksのデータが第三者に開示または販売されることはありません。</li>
-          </ul>
-        </section>
-
-        <section className="space-y-2">
-          <h2 className="text-lg font-bold text-amber-300">4. データの保存場所と管理</h2>
+          <h2 className="text-lg font-bold text-amber-300">3. データの保存場所と管理</h2>
           <p className="text-sm text-slate-300 leading-relaxed">
             利用者のデータは、利用者の端末ローカルストレージ（IndexedDB/LocalStorage）およびGoogle Cloudが提供するセキュアなFirestoreクラウドデータベースに暗号化通信（HTTPS/TLS）を用いて保存されます。
           </p>
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-lg font-bold text-amber-300">5. データの削除および連携解除</h2>
+          <h2 className="text-lg font-bold text-amber-300">4. データの削除および連携解除</h2>
           <p className="text-sm text-slate-300 leading-relaxed">
             利用者は、当アプリの設定画面よりいつでもログアウトすることができます。また、Googleアカウントの
             <a 
@@ -86,7 +61,7 @@ export const PrivacyPolicy: React.FC = () => {
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-lg font-bold text-amber-300">6. お問い合わせ先</h2>
+          <h2 className="text-lg font-bold text-amber-300">5. お問い合わせ先</h2>
           <p className="text-sm text-slate-300 leading-relaxed">
             本プライバシーポリシーや個人情報の取り扱いに関するご質問、データ削除のご要望は、以下のデベロッパー連絡先までお問い合わせください。
           </p>

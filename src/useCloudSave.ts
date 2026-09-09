@@ -69,7 +69,7 @@ export function useCloudSave(
           
           const snapshot = await withTimeout(
             getDoc(saveDocRef), 
-            10000, 
+            25000, 
             'Firestoreサーバーへの接続がタイムアウトしました。'
           );
 
@@ -85,7 +85,7 @@ export function useCloudSave(
             const compressedPayload = compressSaveDataForCloud(currentData);
             await withTimeout(
               setDoc(saveDocRef, compressedPayload),
-              10000,
+              25000,
               'クラウドへのデータ保存がタイムアウトしました。'
             );
             setLastSyncedAt(new Date().toLocaleTimeString());
@@ -131,7 +131,7 @@ export function useCloudSave(
 
       await withTimeout(
         setDoc(saveDocRef, compressedPayload),
-        10000,
+        25000,
         'クラウド同期がタイムアウトしました。'
       );
       setLastSyncedAt(new Date(compressedPayload.updatedAt).toLocaleTimeString());

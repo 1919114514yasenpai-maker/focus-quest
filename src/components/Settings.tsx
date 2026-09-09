@@ -1,12 +1,12 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { User } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import LZString from 'lz-string';
 import { db } from '../firebase';
 import { generateUid } from '../gameData';
 import { SaveData } from '../types';
-import { sanitizeSaveData, parseSaveText } from '../saveManager';
-import { parseAnySaveText } from '../compression';
+import { sanitizeSaveData, parseSaveText, minifySaveData } from '../saveManager';
+import { parseAnySaveText, getSaveDataSizeStats } from '../compression';
 
 interface SettingsProps {
   onClose: () => void;
@@ -58,6 +58,8 @@ export const Settings: React.FC<SettingsProps> = ({
 
   const isAdminAccount = user && (user.email?.toLowerCase().trim() === '1919114514yasenpai@gmail.com');
 
+  const sizeStats = useMemo(() => getSaveDataSizeStats(saveData), [saveData]);
+
   const handleRegenerateGuilds = async () => {
     if (!user) return;
     setIsRegeneratingGuilds(true);
@@ -108,7 +110,8 @@ export const Settings: React.FC<SettingsProps> = ({
 
   const handleCopyText = async () => {
     try {
-      const json = JSON.stringify(saveData);
+      const minified = minifySaveData(saveData);
+      const json = JSON.stringify(minified);
       // LZ-String 圧縮コード (コードが大幅に短縮され貼り付け時の文字化けや欠落を防止)
       const compressed = LZString.compressToBase64(json);
       await navigator.clipboard.writeText(compressed);
@@ -289,7 +292,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     </div>
                   </div>
                   <p className="text-[10px] text-emerald-400/90 bg-emerald-950/40 p-1.5 rounded border border-emerald-800/60">
-                    ✅ ログイン中：超高速データ圧縮（90%以上軽量化）によりタイムアウトせず安全に同期されます。
+                    ✅ ログイン中：超高速データ圧縮（95%以上軽量化）によりタイムアウトせず安全に同期されます。
                   </p>
                 </div>
               ) : (
@@ -306,6 +309,34 @@ export const Settings: React.FC<SettingsProps> = ({
                   </button>
                 </div>
               )}
+
+              {/* 超軽量化ステータス表示 */}
+              <div className="p-2 bg-slate-950/90 rounded border border-indigo-900/60 text-[11px] space-y-1 mt-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-amber-300 flex items-center gap-1 text-[10px]">
+                    ⚡ クラウドデータ軽量化
+                  </span>
+                  <span className="text-emerald-400 font-bold text-[10px]">
+                    {sizeStats.reductionPercent}% 削減済み
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 text-[10px] pt-0.5">
+                  <div className="bg-slate-900 p-1.5 rounded border border-slate-800">
+                    <span className="block text-slate-400 text-[9px]">送信サイズ</span>
+                    <span className="font-mono font-bold text-emerald-300 text-[11px]">
+                      {(sizeStats.compressedBytes / 1024).toFixed(1)} KB
+                    </span>
+                    <span className="text-[9px] text-slate-500 block">上限1MBの {sizeStats.limitRatio}%</span>
+                  </div>
+                  <div className="bg-slate-900 p-1.5 rounded border border-slate-800">
+                    <span className="block text-slate-400 text-[9px]">生JSONサイズ</span>
+                    <span className="font-mono text-slate-300 text-[11px]">
+                      {(sizeStats.rawBytes / 1024).toFixed(1)} KB
+                    </span>
+                    <span className="text-[9px] text-slate-500 block">未強化・初期値を省略</span>
+                  </div>
+                </div>
+              </div>
 
               {syncError && (
                 <div className="text-[11px] text-rose-300 bg-rose-950/90 p-2 border border-rose-600 rounded flex items-start justify-between gap-1 mt-1">

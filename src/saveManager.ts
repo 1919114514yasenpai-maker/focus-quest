@@ -20,6 +20,131 @@ export function parseSaveText(input: string): any {
   }
 }
 
+export function sanitizeSingleItem(item: any): PlayerItem | null {
+  if (!item) return null;
+  if (typeof item === 'string') {
+    const baseId = ITEMS[item] ? item : 'w_wood_sword';
+    return {
+      uid: generateUid(),
+      baseId,
+      upgradeLevel: 0,
+      limitBreak: 0,
+      addedPower: 0,
+    };
+  }
+  if (typeof item === 'object') {
+    const baseId = item.baseId || item.id || 'w_wood_sword';
+    const validBaseId = ITEMS[baseId] ? baseId : 'w_wood_sword';
+
+    const upgradeLevel = typeof item.upgradeLevel === 'number' 
+      ? Math.max(0, item.upgradeLevel) 
+      : (typeof item.lvl === 'number' ? Math.max(0, item.lvl) : 0);
+    const limitBreak = typeof item.limitBreak === 'number' 
+      ? Math.max(0, item.limitBreak) 
+      : (typeof item.lb === 'number' ? Math.max(0, item.lb) : 0);
+    const addedPower = typeof item.addedPower === 'number' 
+      ? item.addedPower 
+      : (typeof item.pow === 'number' ? item.pow : 0);
+    const specialEnchantCount = typeof item.specialEnchantCount === 'number' 
+      ? Math.max(0, item.specialEnchantCount) 
+      : (typeof item.sec === 'number' ? Math.max(0, item.sec) : 0);
+    const customPrefix = typeof item.customPrefix === 'string' && item.customPrefix.trim() 
+      ? item.customPrefix.trim() 
+      : (typeof item.pfx === 'string' && item.pfx.trim() ? item.pfx.trim() : undefined);
+    const isLocked = Boolean(item.isLocked || item.lock);
+    const isUncursed = Boolean(item.isUncursed || item.unc);
+    const unlockedSockets = typeof item.unlockedSockets === 'number' 
+      ? Math.max(0, Math.min(3, item.unlockedSockets)) 
+      : (typeof item.soc === 'number' ? Math.max(0, Math.min(3, item.soc)) : 0);
+    const engraving = typeof item.engraving === 'string' && item.engraving.trim() 
+      ? item.engraving.trim() 
+      : (typeof item.eng === 'string' && item.eng.trim() ? item.eng.trim() : undefined);
+
+    let slottedGems: string[] | undefined = undefined;
+    const gemsRaw = item.slottedGems || item.gems;
+    if (Array.isArray(gemsRaw)) {
+      const validGems = gemsRaw.filter((g: any) => typeof g === 'string' && ITEMS[g] && ITEMS[g].type === 'gem');
+      if (validGems.length > 0) {
+        slottedGems = validGems;
+      }
+    }
+
+    let packedItems: PlayerItem[] | undefined = undefined;
+    const packedRaw = item.packedItems || item.pack;
+    if (Array.isArray(packedRaw) && packedRaw.length > 0) {
+      const validPacked = packedRaw.map(sanitizeSingleItem).filter((p): p is PlayerItem => p !== null);
+      if (validPacked.length > 0) {
+        packedItems = validPacked;
+      }
+    }
+
+    return {
+      uid: item.uid ? String(item.uid) : generateUid(),
+      baseId: validBaseId,
+      upgradeLevel,
+      limitBreak,
+      addedPower,
+      specialEnchantCount,
+      customPrefix,
+      addedEffect: item.addedEffect || item.eff,
+      isLocked,
+      isUncursed,
+      unlockedSockets,
+      slottedGems,
+      engraving,
+      packedItems,
+    };
+  }
+  return null;
+}
+
+export function minifyPlayerItem(item: PlayerItem): any {
+  const min: any = {
+    uid: item.uid,
+    baseId: item.baseId,
+  };
+  if (item.upgradeLevel > 0) min.lvl = item.upgradeLevel;
+  if (item.limitBreak && item.limitBreak > 0) min.lb = item.limitBreak;
+  if (item.addedPower) min.pow = item.addedPower;
+  if (item.specialEnchantCount && item.specialEnchantCount > 0) min.sec = item.specialEnchantCount;
+  if (item.customPrefix) min.pfx = item.customPrefix;
+  if (item.addedEffect) min.eff = item.addedEffect;
+  if (item.isLocked) min.lock = 1;
+  if (item.isUncursed) min.unc = 1;
+  if (item.unlockedSockets && item.unlockedSockets > 0) min.soc = item.unlockedSockets;
+  if (item.slottedGems && item.slottedGems.length > 0) min.gems = item.slottedGems;
+  if (item.engraving) min.eng = item.engraving;
+  if (item.packedItems && item.packedItems.length > 0) {
+    min.pack = item.packedItems.map(minifyPlayerItem);
+  }
+  return min;
+}
+
+export function minifySaveData(data: SaveData): any {
+  return {
+    stats: {
+      lvl: data.stats.level,
+      xp: data.stats.xp,
+      g: data.stats.gold,
+      hp: data.stats.hp,
+      mhp: data.stats.maxHp,
+      stg: data.stats.stage,
+      mstg: data.stats.maxStageReached,
+      job: data.stats.job,
+      ...(data.stats.lastJobChangeLevel !== undefined ? { ljc: data.stats.lastJobChangeLevel } : {}),
+      ...(data.stats.hasCurseImmunity ? { ci: 1 } : {}),
+      ...(data.stats.creditScore !== undefined && data.stats.creditScore !== 100 ? { cs: data.stats.creditScore } : {}),
+    },
+    equipment: {
+      sw: data.equipment.statWeaponId,
+      aw: data.equipment.appearanceWeaponId,
+      sa: data.equipment.statArmorId,
+      aa: data.equipment.appearanceArmorId,
+    },
+    inventory: (data.inventory || []).map(minifyPlayerItem),
+  };
+}
+
 export function sanitizeSaveData(rawData: any): SaveData {
   if (!rawData || typeof rawData !== 'object') {
     return {
@@ -46,60 +171,12 @@ export function sanitizeSaveData(rawData: any): SaveData {
   let inventory: PlayerItem[] = [];
 
   if (Array.isArray(rawData.inventory)) {
-    inventory = rawData.inventory.map((item: any): PlayerItem => {
-      // 古い形式：文字列 ID
-      if (typeof item === 'string') {
-        const baseId = ITEMS[item] ? item : 'w_wood_sword';
-        return {
-          uid: generateUid(),
-          baseId,
-          upgradeLevel: 0,
-          limitBreak: 0,
-          addedPower: 0,
-        };
-      }
-      // オブジェクト形式
-      if (item && typeof item === 'object') {
-        const baseId = item.baseId || item.id || 'w_wood_sword';
-        const validBaseId = ITEMS[baseId] ? baseId : 'w_wood_sword';
-
-        let slottedGems: string[] | undefined = undefined;
-        if (Array.isArray(item.slottedGems)) {
-          const validGems = item.slottedGems.filter((g: any) => typeof g === 'string' && ITEMS[g] && ITEMS[g].type === 'gem');
-          if (validGems.length > 0) {
-            slottedGems = validGems;
-          }
-        }
-
-        const cleanItem: PlayerItem = {
-          uid: item.uid ? String(item.uid) : generateUid(),
-          baseId: validBaseId,
-          upgradeLevel: typeof item.upgradeLevel === 'number' ? Math.max(0, item.upgradeLevel) : 0,
-          limitBreak: typeof item.limitBreak === 'number' ? Math.max(0, item.limitBreak) : 0,
-          addedPower: typeof item.addedPower === 'number' ? item.addedPower : 0,
-          specialEnchantCount: typeof item.specialEnchantCount === 'number' ? Math.max(0, item.specialEnchantCount) : 0,
-          customPrefix: typeof item.customPrefix === 'string' && item.customPrefix.trim() ? item.customPrefix.trim() : undefined,
-          addedEffect: item.addedEffect,
-          isLocked: Boolean(item.isLocked),
-          isUncursed: Boolean(item.isUncursed),
-          unlockedSockets: typeof item.unlockedSockets === 'number' ? Math.max(0, Math.min(3, item.unlockedSockets)) : 0,
-          slottedGems: slottedGems,
-          engraving: typeof item.engraving === 'string' && item.engraving.trim() ? item.engraving.trim() : undefined,
-        };
-
-        return cleanItem;
-      }
-      return {
-        uid: generateUid(),
-        baseId: 'w_wood_sword',
-        upgradeLevel: 0,
-        limitBreak: 0,
-        addedPower: 0,
-      };
-    });
+    inventory = rawData.inventory
+      .map(sanitizeSingleItem)
+      .filter((i): i is PlayerItem => i !== null);
   }
 
-  // インベントリが空なら初期装備を付元
+  // インベントリが空なら初期装備を付与
   if (inventory.length === 0) {
     inventory = [...INITIAL_INVENTORY];
   }
@@ -107,8 +184,8 @@ export function sanitizeSaveData(rawData: any): SaveData {
   // 2. Equipment Normalization
   const rawEquip = rawData.equipment || {};
 
-  let statWeaponId = String(rawEquip.statWeaponId || 'initial_w');
-  let statArmorId = String(rawEquip.statArmorId || 'initial_a');
+  let statWeaponId = String(rawEquip.statWeaponId || rawEquip.sw || 'initial_w');
+  let statArmorId = String(rawEquip.statArmorId || rawEquip.sa || 'initial_a');
 
   // statWeaponId が inventory 内の uid に存在するか確認
   let foundWeapon = inventory.find(i => i.uid === statWeaponId);
@@ -150,12 +227,15 @@ export function sanitizeSaveData(rawData: any): SaveData {
     }
   }
 
-  const appearanceWeaponId = (rawEquip.appearanceWeaponId && ITEMS[rawEquip.appearanceWeaponId]?.type === 'weapon')
-    ? rawEquip.appearanceWeaponId
+  const rawAppW = rawEquip.appearanceWeaponId || rawEquip.aw;
+  const rawAppA = rawEquip.appearanceArmorId || rawEquip.aa;
+
+  const appearanceWeaponId = (rawAppW && ITEMS[rawAppW]?.type === 'weapon')
+    ? rawAppW
     : (foundWeapon && ITEMS[foundWeapon.baseId]?.type === 'weapon' ? foundWeapon.baseId : 'w_wood_sword');
 
-  const appearanceArmorId = (rawEquip.appearanceArmorId && ITEMS[rawEquip.appearanceArmorId]?.type === 'armor')
-    ? rawEquip.appearanceArmorId
+  const appearanceArmorId = (rawAppA && ITEMS[rawAppA]?.type === 'armor')
+    ? rawAppA
     : (foundArmor && ITEMS[foundArmor.baseId]?.type === 'armor' ? foundArmor.baseId : 'a_cloth');
 
   const equipment: EquipmentState = {
@@ -173,32 +253,45 @@ export function sanitizeSaveData(rawData: any): SaveData {
   const armorBase = statArmorItem ? ITEMS[statArmorItem.baseId] : null;
   const maxHpBonus = armorBase?.effect?.maxHpBonus || 0;
 
-  const level = typeof rawStats.level === 'number' && rawStats.level > 0 ? rawStats.level : 1;
+  const level = typeof rawStats.level === 'number' && rawStats.level > 0 
+    ? rawStats.level 
+    : (typeof rawStats.lvl === 'number' && rawStats.lvl > 0 ? rawStats.lvl : 1);
   const calculatedMaxHp = 100 + (level - 1) * 25 + maxHpBonus;
 
-  const maxHp = typeof rawStats.maxHp === 'number' && rawStats.maxHp > 0
-    ? rawStats.maxHp
-    : calculatedMaxHp;
+  const rawMaxHp = typeof rawStats.maxHp === 'number' && rawStats.maxHp > 0 
+    ? rawStats.maxHp 
+    : (typeof rawStats.mhp === 'number' && rawStats.mhp > 0 ? rawStats.mhp : calculatedMaxHp);
+  const maxHp = rawMaxHp;
 
-  const hp = typeof rawStats.hp === 'number' && rawStats.hp >= 0
-    ? Math.min(rawStats.hp, maxHp)
-    : maxHp;
+  const rawHp = typeof rawStats.hp === 'number' && rawStats.hp >= 0 ? rawStats.hp : maxHp;
+  const hp = Math.min(rawHp, maxHp);
+
+  const stage = typeof rawStats.stage === 'number' && rawStats.stage > 0 
+    ? rawStats.stage 
+    : (typeof rawStats.stg === 'number' && rawStats.stg > 0 ? rawStats.stg : 1);
+  const maxStageReached = typeof rawStats.maxStageReached === 'number' && rawStats.maxStageReached > 0
+    ? rawStats.maxStageReached
+    : (typeof rawStats.mstg === 'number' && rawStats.mstg > 0 ? rawStats.mstg : stage);
 
   const validJobs = ['merchant', 'miner', 'appraiser', 'warrior', 'balanced', 'artisan'];
   const stats: PlayerStats = {
     level,
     xp: typeof rawStats.xp === 'number' && rawStats.xp >= 0 ? rawStats.xp : 0,
-    gold: typeof rawStats.gold === 'number' && rawStats.gold >= 0 ? rawStats.gold : 50,
+    gold: typeof rawStats.gold === 'number' && rawStats.gold >= 0 
+      ? rawStats.gold 
+      : (typeof rawStats.g === 'number' && rawStats.g >= 0 ? rawStats.g : 50),
     hp,
     maxHp,
-    stage: typeof rawStats.stage === 'number' && rawStats.stage > 0 ? rawStats.stage : 1,
-    maxStageReached: typeof rawStats.maxStageReached === 'number' && rawStats.maxStageReached > 0
-      ? rawStats.maxStageReached
-      : (typeof rawStats.stage === 'number' && rawStats.stage > 0 ? rawStats.stage : 1),
+    stage,
+    maxStageReached,
     job: (validJobs.includes(rawStats.job) ? rawStats.job : 'balanced'),
-    lastJobChangeLevel: typeof rawStats.lastJobChangeLevel === 'number' ? rawStats.lastJobChangeLevel : undefined,
-    hasCurseImmunity: Boolean(rawStats.hasCurseImmunity),
-    creditScore: typeof rawStats.creditScore === 'number' ? rawStats.creditScore : 100,
+    lastJobChangeLevel: typeof rawStats.lastJobChangeLevel === 'number' 
+      ? rawStats.lastJobChangeLevel 
+      : (typeof rawStats.ljc === 'number' ? rawStats.ljc : undefined),
+    hasCurseImmunity: Boolean(rawStats.hasCurseImmunity || rawStats.ci),
+    creditScore: typeof rawStats.creditScore === 'number' 
+      ? rawStats.creditScore 
+      : (typeof rawStats.cs === 'number' ? rawStats.cs : 100),
   };
 
   return {
