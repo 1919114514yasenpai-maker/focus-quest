@@ -250,7 +250,7 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
 
     try {
       const marketId = generateUid();
-      const expiresAt = Date.now() + durationHours * 60 * 60 * 1000;
+      const expiresAt = durationHours === -1 ? -1 : Date.now() + durationHours * 60 * 60 * 1000;
       const normalizedItem = normalizePlayerItem(selectedSellItem);
 
       const newItem: MarketItem = {
@@ -494,12 +494,16 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
   };
 
   const formatTimeLeft = (expiresAt: number) => {
-    if (!expiresAt) return '終了';
+    if (expiresAt === -1) return '♾️ 無期限';
+    if (!expiresAt || expiresAt <= 0) return '終了';
     const diff = expiresAt - Date.now();
     if (diff <= 0) return '終了';
-    const h = Math.floor(diff / (1000 * 60 * 60));
+    const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
     const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    return `${h}時間${m}分`;
+    if (d > 0) return `${d}日${h}時間`;
+    if (h > 0) return `${h}時間${m}分`;
+    return `${m}分`;
   };
 
   const myUid = auth.currentUser?.uid || '';
@@ -545,7 +549,11 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
 
         if (sortBy === 'price_asc') return getPrice(a) - getPrice(b);
         if (sortBy === 'price_desc') return getPrice(b) - getPrice(a);
-        if (sortBy === 'expires_soon') return a.expiresAt - b.expiresAt;
+        if (sortBy === 'expires_soon') {
+          const timeA = a.expiresAt <= 0 ? Infinity : a.expiresAt;
+          const timeB = b.expiresAt <= 0 ? Infinity : b.expiresAt;
+          return timeA - timeB;
+        }
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
   }, [items, myUid, filterListingType, filterType, searchQuery, sortBy]);
@@ -634,26 +642,26 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
         </div>
 
         {/* Tab switcher */}
-        <div className="flex gap-2 mb-3 flex-shrink-0">
+        <div className="flex gap-1.5 sm:gap-2 mb-3 flex-shrink-0">
           <button
             onClick={() => setTab('buy')}
-            className={`pixel-btn flex-1 text-xs sm:text-sm py-2 font-bold transition-all ${
+            className={`pixel-btn flex-1 text-xs sm:text-sm py-1.5 sm:py-2 font-bold transition-all ${
               tab === 'buy' ? '!bg-amber-600 !border-amber-400 text-white shadow-md' : '!bg-slate-800/80 !text-slate-400'
             }`}
           >
-            🛒 買う (ショップ＆オークション)
+            🛒 買う<span className="hidden sm:inline"> (ショップ＆オークション)</span>
           </button>
           <button
             onClick={() => setTab('sell')}
-            className={`pixel-btn flex-1 text-xs sm:text-sm py-2 font-bold transition-all ${
+            className={`pixel-btn flex-1 text-xs sm:text-sm py-1.5 sm:py-2 font-bold transition-all ${
               tab === 'sell' ? '!bg-amber-600 !border-amber-400 text-white shadow-md' : '!bg-slate-800/80 !text-slate-400'
             }`}
           >
-            💰 売る (出品)
+            💰 売る<span className="hidden sm:inline"> (出品)</span>
           </button>
           <button
             onClick={() => setTab('my')}
-            className={`pixel-btn flex-1 text-xs sm:text-sm py-2 font-bold relative transition-all ${
+            className={`pixel-btn flex-1 text-xs sm:text-sm py-1.5 sm:py-2 font-bold relative transition-all ${
               tab === 'my' ? '!bg-amber-600 !border-amber-400 text-white shadow-md' : '!bg-slate-800/80 !text-slate-400'
             }`}
           >
@@ -917,13 +925,15 @@ export const AuctionHouse: React.FC<AuctionHouseProps> = ({
                       <label className="text-xs text-slate-300 block mb-1">出品期間</label>
                       <select
                         value={durationHours}
-                        onChange={(e) => setDurationHours(parseInt(e.target.value) || 48)}
+                        onChange={(e) => setDurationHours(Number(e.target.value))}
                         className="pixel-input w-full p-2 bg-slate-900 border border-slate-700 text-slate-200 text-xs"
                       >
+                        <option value={-1}>♾️ 無期限 (期限なし・売れるまで継続)</option>
                         <option value={12}>12時間</option>
                         <option value={24}>24時間</option>
-                        <option value={48}>48時間 (推奨)</option>
+                        <option value={48}>48時間 (2日間)</option>
                         <option value={72}>72時間 (3日間)</option>
+                        <option value={168}>168時間 (7日間)</option>
                       </select>
                     </div>
 

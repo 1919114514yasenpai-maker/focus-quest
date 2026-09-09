@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { EquipmentState, GameItem, PlayerItem, ItemEffect, JobType } from '../types';
-import { ITEMS, isCraftExclusiveItem } from '../gameData';
+import { EquipmentState, GameItem, PlayerItem, ItemEffect, JobType, CraftingRecipe } from '../types';
+import { ITEMS, isCraftExclusiveItem, CRAFTING_RECIPES } from '../gameData';
 import { WEAPON_SPRITES, ARMOR_SPRITES, drawIconSprite } from '../sprites';
 import { 
   getCompiledItem, 
@@ -201,9 +201,12 @@ export const Inventory: React.FC<InventoryProps> = ({
   const [tab, setTab] = useState<'inventory' | 'shop' | 'dailyShop' | 'forge' | 'craft' | 'materials'>('inventory');
   const [materialFilter, setMaterialFilter] = useState<'all' | 'material' | 'chest' | 'gem' | 'consumable'>('all');
   const [selectedMaterialUid, setSelectedMaterialUid] = useState<string>('');
+  const [selectedMaterialBaseId, setSelectedMaterialBaseId] = useState<string>('');
+  const [isSpecialMaterialModalOpen, setIsSpecialMaterialModalOpen] = useState<boolean>(false);
   const [detailPlayerItem, setDetailPlayerItem] = useState<PlayerItem | null>(null);
   const [dismantleConfirmItem, setDismantleConfirmItem] = useState<{ item: PlayerItem; gameItem: GameItem } | null>(null);
   const [packBoxItem, setPackBoxItem] = useState<PlayerItem | null>(null);
+  const [packCategory, setPackCategory] = useState<'all' | 'materials' | 'consumables' | 'equipment'>('all');
   const [selectedPackItemUids, setSelectedPackItemUids] = useState<string[]>([]);
   const [uncurseConfirmItem, setUncurseConfirmItem] = useState<{ item: PlayerItem; gameItem: GameItem; cost: number } | null>(null);
   const [transferScrollUid, setTransferScrollUid] = useState<string | null>(null);
@@ -264,12 +267,195 @@ export const Inventory: React.FC<InventoryProps> = ({
     );
   }, []);
 
-  // Initialize selected material if none is selected
+  // 特殊強化に使用可能な素材の一覧（重複をまとめて種類ごとに整理）
+  const enchantableMaterials = useMemo(() => {
+    const map = new Map<string, { baseId: string; count: number; uids: string[] }>();
+    materials.forEach(m => {
+      if (m.isLocked || m.packedItems) return;
+      const base = ITEMS[m.baseId];
+      if (!base || base.type !== 'material') return;
+      const cur = map.get(m.baseId);
+      if (cur) {
+        cur.count++;
+        cur.uids.push(m.uid);
+      } else {
+        map.set(m.baseId, { baseId: m.baseId, count: 1, uids: [m.uid] });
+      }
+    });
+
+    return Array.from(map.values()).map(entry => {
+      const item = ITEMS[entry.baseId];
+      return {
+        baseId: entry.baseId,
+        name: item?.name || entry.baseId,
+        count: entry.count,
+        sampleUid: entry.uids[0],
+        allUids: entry.uids,
+        item,
+      };
+    });
+  }, [materials]);
+
+  // Initialize selected material baseId if none is selected or current is invalid
   useEffect(() => {
-    if (materials.length > 0 && !materials.find(m => m.uid === selectedMaterialUid)) {
-      setSelectedMaterialUid(materials[0].uid);
+    if (enchantableMaterials.length > 0) {
+      if (!selectedMaterialBaseId || !enchantableMaterials.find(m => m.baseId === selectedMaterialBaseId)) {
+        const first = enchantableMaterials[0];
+        setSelectedMaterialBaseId(first.baseId);
+        setSelectedMaterialUid(first.sampleUid);
+      }
+    } else {
+      setSelectedMaterialBaseId('');
+      setSelectedMaterialUid('');
     }
-  }, [materials, selectedMaterialUid]);
+  }, [enchantableMaterials, selectedMaterialBaseId]);
+
+  const currentSelectedMat = useMemo(() => {
+    return enchantableMaterials.find(m => m.baseId === selectedMaterialBaseId);
+  }, [enchantableMaterials, selectedMaterialBaseId]);
+
+  const MATERIAL_ENCHANT_INFO: Record<string, { title: string; desc: (qty: number) => string; color: string; badge: string }> = {
+    'm_slime_jelly': {
+      title: '粘り属性',
+      badge: '🟢 スロー付与',
+      color: 'border-emerald-700 bg-emerald-950/40 text-emerald-300',
+      desc: (q) => `敵の攻撃速度 -${Math.min(90, 15 * q)}% (粘液スロー)`
+    },
+    'm_goblin_ear': {
+      title: '会心属性',
+      badge: '🔴 クリティカルUP',
+      color: 'border-rose-700 bg-rose-950/40 text-rose-300',
+      desc: (q) => `クリティカル率 +${Math.min(100, 5 * q)}%`
+    },
+    'm_orc_fang': {
+      title: '吸血属性',
+      badge: '🟣 HP吸収付与',
+      color: 'border-purple-700 bg-purple-950/40 text-purple-300',
+      desc: (q) => `攻撃時HP吸収 +${Math.min(100, 3 * q)}%`
+    },
+    'm_demon_horn': {
+      title: '魔性属性',
+      badge: '🟡 自動回復&火力UP',
+      color: 'border-amber-700 bg-amber-950/40 text-amber-300',
+      desc: (q) => `毎秒HP回復+${2 * q} & 与ダメ+${5 * q}%`
+    },
+    'm_dragon_scale': {
+      title: '覇竜属性',
+      badge: '🐲 最大HP&獲得G大幅UP',
+      color: 'border-yellow-700 bg-yellow-950/40 text-yellow-300',
+      desc: (q) => `最大HP+${30 * q} & 獲得G+${10 * q}%`
+    },
+    'm_deep_crystal': {
+      title: '深層結晶',
+      badge: '💎 深層の力',
+      color: 'border-cyan-700 bg-cyan-950/40 text-cyan-300',
+      desc: (q) => `攻/防ステータス増強 (+${4 * q})`
+    },
+    'm_abyss_core': {
+      title: '奈落の核',
+      badge: '🌌 奈落の加護',
+      color: 'border-violet-700 bg-violet-950/40 text-violet-300',
+      desc: (q) => `全能力強化 & 深淵の加護`
+    }
+  };
+
+  // --- 箱詰め（梱包）関連ヘルパー ---
+  const packItemGroups = useMemo(() => {
+    if (!packBoxItem) return [];
+    const maxPrice = packBoxItem.baseId === 'c_empty_box_c' ? 10000 : packBoxItem.baseId === 'c_empty_box_b' ? 100000 : 999999999;
+    
+    const map = new Map<string, {
+      key: string;
+      baseId: string;
+      name: string;
+      type: string;
+      price: number;
+      color?: string;
+      item: GameItem;
+      sampleItem: PlayerItem;
+      uids: string[];
+      totalCount: number;
+      canPack: boolean;
+      upgradeLevel?: number;
+      addedPower?: number;
+      isCursed?: boolean;
+    }>();
+
+    inventory.forEach(i => {
+      if (i.uid === packBoxItem.uid || i.isLocked || i.packedItems) return;
+      if (equipment.statWeaponId === i.uid || equipment.statArmorId === i.uid) return;
+
+      const base = ITEMS[i.baseId];
+      if (!base) return;
+
+      let groupKey: string;
+      if (base.type === 'material' || base.type === 'chest' || base.type === 'consumable' || base.type === 'gem') {
+        groupKey = i.baseId;
+      } else {
+        groupKey = `${i.baseId}_+${i.upgradeLevel || 0}_${i.addedPower || 0}_${i.isCursed ? 'c' : ''}_${(i.slottedGems || []).join(',')}_${i.effect?.description || ''}`;
+      }
+
+      const existing = map.get(groupKey);
+      if (existing) {
+        existing.uids.push(i.uid);
+        existing.totalCount++;
+      } else {
+        map.set(groupKey, {
+          key: groupKey,
+          baseId: i.baseId,
+          name: base.name,
+          type: base.type,
+          price: base.price,
+          color: base.color,
+          item: base,
+          sampleItem: i,
+          uids: [i.uid],
+          totalCount: 1,
+          canPack: base.price <= maxPrice,
+          upgradeLevel: i.upgradeLevel,
+          addedPower: i.addedPower,
+          isCursed: i.isCursed,
+        });
+      }
+    });
+
+    return Array.from(map.values());
+  }, [inventory, packBoxItem, equipment]);
+
+  const filteredPackGroups = useMemo(() => {
+    return packItemGroups.filter(g => {
+      if (packCategory === 'materials') return g.type === 'material' || g.type === 'gem';
+      if (packCategory === 'consumables') return g.type === 'consumable' || g.type === 'chest';
+      if (packCategory === 'equipment') return g.type === 'weapon' || g.type === 'armor';
+      return true;
+    });
+  }, [packItemGroups, packCategory]);
+
+  const handleSetGroupPackCount = (groupUids: string[], targetCount: number) => {
+    const currentSelectedFromGroup = groupUids.filter(uid => selectedPackItemUids.includes(uid));
+    const currentCount = currentSelectedFromGroup.length;
+    const clampedTarget = Math.max(0, Math.min(groupUids.length, targetCount));
+    
+    if (clampedTarget === currentCount) return;
+
+    if (clampedTarget > currentCount) {
+      const toAddCount = clampedTarget - currentCount;
+      const availableToAdd = groupUids.filter(uid => !selectedPackItemUids.includes(uid)).slice(0, toAddCount);
+      setSelectedPackItemUids(prev => [...prev, ...availableToAdd]);
+    } else {
+      const toRemoveCount = currentCount - clampedTarget;
+      const toRemove = currentSelectedFromGroup.slice(currentCount - toRemoveCount);
+      setSelectedPackItemUids(prev => prev.filter(uid => !toRemove.includes(uid)));
+    }
+  };
+
+  const selectedPackTotalPrice = useMemo(() => {
+    return selectedPackItemUids.reduce((sum, uid) => {
+      const it = inventory.find(i => i.uid === uid);
+      if (!it) return sum;
+      return sum + (ITEMS[it.baseId]?.price || 0);
+    }, 0);
+  }, [selectedPackItemUids, inventory]);
 
   // --- 一括売却関連ヘルパー ---
   const selectedSellTotalPrice = useMemo(() => {
@@ -750,42 +936,43 @@ export const Inventory: React.FC<InventoryProps> = ({
                   累計 {specialCount}回 強化済
                 </span>
               </div>
-              <div className="flex items-center gap-2">
-                <select 
-                  value={selectedMaterialUid} 
-                  onChange={e => setSelectedMaterialUid(e.target.value)}
-                  className="bg-slate-900 text-[10px] text-slate-200 border border-slate-700 rounded p-1 flex-1"
-                >
-                  <option value="" disabled>素材を選択</option>
-                  {materials.map(m => {
-                    const baseMat = ITEMS[m.baseId];
-                    const count = materials.filter(mat => mat.baseId === m.baseId).length;
-                    return (
-                      <option key={m.uid} value={m.uid}>{baseMat?.name} (所持: {count}個)</option>
-                    );
-                  })}
-                </select>
-              </div>
 
-              {selectedMaterialUid && (() => {
-                const selMat = materials.find(m => m.uid === selectedMaterialUid);
-                if (!selMat) return null;
-                const availableMats = materials.filter(m => m.baseId === selMat.baseId);
-                const matCount = availableMats.length;
+              {/* ゲーム内ウィンドウを開くための素材選択ボタン */}
+              <button
+                type="button"
+                onClick={() => setIsSpecialMaterialModalOpen(true)}
+                className="w-full flex items-center justify-between bg-slate-900 hover:bg-slate-850 active:bg-slate-800 border border-slate-700 hover:border-purple-400/80 rounded p-1.5 transition-all text-left group"
+              >
+                {currentSelectedMat ? (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <ItemIcon item={currentSelectedMat.item} size={22} />
+                    <span className="text-xs font-bold text-slate-100 truncate group-hover:text-purple-300">
+                      {currentSelectedMat.name}
+                    </span>
+                    <span className="text-[10px] text-purple-300 font-bold bg-purple-950/90 px-1.5 py-0.5 rounded border border-purple-800/80 shrink-0">
+                      x{currentSelectedMat.count}個
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-xs text-slate-400 flex items-center gap-1.5">
+                    <span>💎</span> 素材を選択してください（タップ）
+                  </span>
+                )}
+                <span className="text-[10px] text-purple-400 font-bold px-1.5 py-0.5 bg-purple-950/60 rounded border border-purple-900/60 shrink-0 ml-1">
+                  変更 ▾
+                </span>
+              </button>
+
+              {currentSelectedMat && (() => {
+                const matCount = currentSelectedMat.count;
                 const curQty = Math.min(specialEnchantQty || 1, matCount);
-
-                const matInfo: Record<string, string> = {
-                  'm_slime_jelly': `🟢 粘り属性: 敵の攻撃速度 -${Math.min(90, 15 * curQty)}% (粘液スロー)`,
-                  'm_goblin_ear': `🔴 会心属性: クリティカル率 +${Math.min(100, 5 * curQty)}%`,
-                  'm_orc_fang': `🟣 吸血属性: 攻撃時HP吸収 +${Math.min(100, 3 * curQty)}%`,
-                  'm_demon_horn': `🟡 魔性属性: 毎秒HP回復+${2 * curQty} & 与ダメ+${5 * curQty}%`,
-                  'm_dragon_scale': `🐲 覇竜属性: 最大HP+${30 * curQty} & 獲得G+${10 * curQty}%`,
-                };
+                const info = MATERIAL_ENCHANT_INFO[currentSelectedMat.baseId];
+                const effectText = info ? info.desc(curQty) : `能力+${(3 * curQty)}〜${(7 * curQty)}`;
 
                 return (
                   <div className="flex flex-col gap-1.5 mt-1">
                     <div className="text-[9px] text-purple-200 bg-purple-950/90 p-1.5 rounded border border-purple-800/90">
-                      【{curQty}個消費時の付与予定】{matInfo[selMat.baseId] || '✨ 特殊効果付与'} (能力+{(3 * curQty)}〜{(7 * curQty)})
+                      【{curQty}個消費時の付与予定】{info?.title ? `✨ ${info.title}: ${effectText}` : `✨ ${effectText}`} (能力+{(3 * curQty)}〜{(7 * curQty)})
                     </div>
                     
                     <div className="flex items-center justify-between gap-1 flex-wrap">
@@ -818,15 +1005,15 @@ export const Inventory: React.FC<InventoryProps> = ({
 
                     <button
                       onClick={() => {
-                        const toConsume = availableMats.slice(0, curQty).map(m => m.uid);
-                        const updatedItem = performBatchSpecialEnchant(pItem, selMat.baseId, curQty);
+                        const toConsume = currentSelectedMat.allUids.slice(0, curQty);
+                        const updatedItem = performBatchSpecialEnchant(pItem, currentSelectedMat.baseId, curQty);
                         if (onBatchSpecialEnchant) {
                           onBatchSpecialEnchant(pItem.uid, toConsume, 0, updatedItem);
                         } else if (onSpecialEnchant) {
                           onSpecialEnchant(pItem.uid, toConsume[0], 0, updatedItem);
                         }
                       }}
-                      disabled={!selectedMaterialUid || matCount === 0 || isQuestActive}
+                      disabled={matCount === 0 || isQuestActive}
                       className="pixel-btn text-[10px] !py-1 active !border-purple-400 !bg-purple-900 hover:!bg-purple-800 !text-purple-100 disabled:opacity-40 font-bold mt-0.5"
                     >
                       ✨ 特殊強化を実行 (素材 ×{curQty}個 消費)
@@ -1236,6 +1423,21 @@ export const Inventory: React.FC<InventoryProps> = ({
                   {baseItem.effect?.description || '消費型の特殊アイテムです。'}
                 </p>
               </div>
+
+              {detailPlayerItem.baseId === 'c_transfer_scroll' && (
+                <button
+                  onClick={() => {
+                    setTransferScrollUid(detailPlayerItem.uid);
+                    setTransferSourceUid('');
+                    setTransferTargetUid('');
+                    setDetailPlayerItem(null);
+                  }}
+                  disabled={isQuestActive}
+                  className="pixel-btn text-xs w-full !bg-purple-700 hover:!bg-purple-600 !text-purple-100 !border-purple-400 font-bold py-2 shadow-md"
+                >
+                  📜 強化継承を行う（強化値を別の武具へ移す）
+                </button>
+              )}
 
               {detailPlayerItem.baseId.startsWith('c_empty_box_') && !detailPlayerItem.packedItems && (
                 <button
@@ -1772,37 +1974,84 @@ export const Inventory: React.FC<InventoryProps> = ({
     );
   };
 
-  const renderRecipeCard = (recipe: any) => {
-    // Basic rendering for recipe
+  const renderRecipeCard = (recipe: CraftingRecipe) => {
+    const resultItem = ITEMS[recipe.resultItemId];
+    if (!resultItem) return null;
+
+    const isArtisan = job === 'artisan';
     const canCraft = recipe.materials.every(m => {
-       const has = materials.filter(i => i.baseId === m.baseId).length;
-       return has >= m.amount;
-    }) && gold >= recipe.cost;
-    
+      const required = isArtisan && m.artisanAmount ? m.artisanAmount : m.amount;
+      const hasCount = inventory.filter(i => i.baseId === m.baseId && !i.isLocked && !i.packedItems).length;
+      return hasCount >= required;
+    }) && gold >= (recipe.cost || 0);
+
     return (
-      <div key={recipe.id} className="pixel-panel flex flex-col gap-2 bg-slate-900/90 border-2 border-slate-700 p-3">
-        <div className="flex justify-between items-center">
-          <span className="font-bold text-slate-200">{recipe.name || ITEMS[recipe.resultItemId]?.name}</span>
-          <span className="text-amber-300 font-bold text-xs">🪙 {recipe.cost} G</span>
+      <div key={recipe.id} className="pixel-panel flex flex-col justify-between bg-slate-900/90 border-2 border-amber-600/70 p-3 shadow-md rounded">
+        <div>
+          <div className="flex items-start justify-between gap-2 mb-1.5 pb-1.5 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <ItemIcon item={resultItem} size={32} />
+              <div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-bold text-sm text-amber-300">{resultItem.name}</span>
+                  <span className="text-[9px] bg-amber-950 text-amber-400 border border-amber-600/50 px-1 py-0.2 rounded font-bold">
+                    クラフト限定
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  {resultItem.type === 'weapon' && `⚔️ 攻撃力: ${resultItem.power}`}
+                  {resultItem.type === 'armor' && `🛡️ 防御力: ${resultItem.power}`}
+                  {resultItem.type === 'consumable' && `🧪 特殊消費アイテム`}
+                </div>
+              </div>
+            </div>
+            {(recipe.cost || 0) > 0 && (
+              <span className="text-amber-300 font-bold text-xs shrink-0">🪙 {recipe.cost} G</span>
+            )}
+          </div>
+
+          {resultItem.effect?.description && (
+            <p className="text-[10px] text-slate-300 bg-slate-950/60 p-1.5 rounded border border-slate-800/80 mb-2 leading-relaxed">
+              {resultItem.effect.description}
+            </p>
+          )}
+
+          <div className="text-[11px] font-bold text-slate-300 mb-1 flex items-center justify-between">
+            <span>必要素材:</span>
+            {isArtisan && (
+              <span className="text-[10px] text-amber-400 font-normal">※職人ボーナスで必要数軽減中</span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-1 mb-3">
+            {recipe.materials.map(m => {
+              const req = isArtisan && m.artisanAmount ? m.artisanAmount : m.amount;
+              const has = inventory.filter(i => i.baseId === m.baseId && !i.isLocked && !i.packedItems).length;
+              const ok = has >= req;
+              const matItem = ITEMS[m.baseId];
+              return (
+                <span 
+                  key={m.baseId} 
+                  className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${
+                    ok 
+                      ? 'bg-emerald-950/80 border-emerald-700 text-emerald-300 font-medium' 
+                      : 'bg-rose-950/80 border-rose-700 text-rose-300'
+                  }`}
+                >
+                  <span>{matItem?.name || m.baseId}</span>
+                  <span className="font-bold">{has}/{req}</span>
+                </span>
+              );
+            })}
+          </div>
         </div>
-        <div className="text-xs text-slate-400 mt-1">必要素材:</div>
-        <div className="flex flex-wrap gap-1">
-          {recipe.materials.map(m => {
-            const has = materials.filter(i => i.baseId === m.baseId).length;
-            const ok = has >= m.amount;
-            return (
-              <span key={m.baseId} className={`text-[10px] px-1.5 py-0.5 rounded border ${ok ? 'bg-emerald-950 border-emerald-800 text-emerald-300' : 'bg-rose-950 border-rose-800 text-rose-300'}`}>
-                {ITEMS[m.baseId]?.name} {has}/{m.amount}
-              </span>
-            );
-          })}
-        </div>
+
         <button 
           onClick={() => onCraftItem && onCraftItem(recipe.id)}
           disabled={!canCraft || isQuestActive}
-          className="pixel-btn text-xs mt-2 w-full !bg-amber-700 hover:!bg-amber-600 disabled:opacity-50"
+          className="pixel-btn text-xs w-full !bg-amber-700 hover:!bg-amber-600 disabled:opacity-40 font-bold py-2 shadow"
         >
-          🔨 クラフトする
+          {isQuestActive ? '⏳ クエスト中は作成できません' : canCraft ? '🔨 クラフトする' : '⚠️ 素材が不足しています'}
         </button>
       </div>
     );
@@ -1913,12 +2162,25 @@ export const Inventory: React.FC<InventoryProps> = ({
           <div>
             <div className="mb-4 text-xs leading-relaxed text-amber-200 bg-amber-950/80 p-3 border-2 border-amber-700/80 rounded shadow-md">
               <p className="font-bold text-sm mb-1">🛠️ クラフト工房</p>
-              <p>素材を組み合わせて強力な装備を作り出せます。ボスからドロップする素材を集めましょう。</p>
+              <p>ボス討伐やダンジョン深層で入手した希少素材・宝石を組み合わせ、ショップでは手に入らない至高の装備や護符を鍛造できます！</p>
+              {job === 'artisan' && (
+                <p className="text-emerald-300 font-bold mt-1">✨ 職人パッシブ発動中：すべてのレシピの必要素材数が割引されています！</p>
+              )}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-               {/* Note: recipes array would normally be used here, but since we lost the RECIPES import maybe, let's just use CRAFTING_RECIPES from gameData if possible, or omit for now if we didn't export it. Actually we had recipes = Object.values(CRAFTING_RECIPES) */ }
-               {/* We need to define recipes at the top of the component or import them. Let's assume CRAFTING_RECIPES is imported. */}
-               <div className="text-xs text-slate-400">クラフト機能は実装中です...</div>
+
+            <h3 className="text-sm font-bold text-amber-300 mb-2 border-b border-slate-800 pb-1">🗡️ クラフト限定 武器</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
+              {CRAFTING_RECIPES.filter(r => r.category === 'weapon').map(recipe => renderRecipeCard(recipe))}
+            </div>
+
+            <h3 className="text-sm font-bold text-amber-300 mb-2 border-b border-slate-800 pb-1">🛡️ クラフト限定 防具</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
+              {CRAFTING_RECIPES.filter(r => r.category === 'armor').map(recipe => renderRecipeCard(recipe))}
+            </div>
+
+            <h3 className="text-sm font-bold text-amber-300 mb-2 border-b border-slate-800 pb-1">🧪 クラフト限定 道具・護符</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
+              {CRAFTING_RECIPES.filter(r => r.category === 'consumable').map(recipe => renderRecipeCard(recipe))}
             </div>
           </div>
         ) : tab === 'materials' ? (
@@ -2042,115 +2304,260 @@ export const Inventory: React.FC<InventoryProps> = ({
 
       {packBoxItem && (
         <div className="fixed inset-0 z-[70] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="pixel-panel w-full max-w-lg bg-slate-900 border-2 border-amber-500 p-4 relative shadow-xl flex flex-col h-[85vh]">
-            <h3 className="text-sm font-bold text-amber-400 mb-1 flex items-center gap-1.5">
-              <span>📦</span>
-              <span>箱に詰めるアイテムを選択（何個でも可能）</span>
-            </h3>
-            <div className="text-xs text-slate-300 mb-2 bg-slate-950 p-2 rounded border border-slate-700 leading-relaxed">
-              <span className="text-amber-300 font-bold">{ITEMS[packBoxItem.baseId]?.name}</span>
-              <div className="text-[11px] text-slate-400 mt-0.5">
-                好きなアイテムを何個でも選択して詰めることができます。梱包した箱はギルドショップに出品したり、保管できます。
+          <div className="pixel-panel w-full max-w-2xl bg-slate-900 border-2 border-amber-500 p-4 relative shadow-[0_0_35px_rgba(245,158,11,0.3)] flex flex-col h-[85vh] rounded">
+            
+            {/* ヘッダー */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-2.5 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">📦</span>
+                <div>
+                  <h3 className="text-sm font-bold text-amber-400 flex items-center gap-1.5">
+                    <span>箱に詰めるアイテムを選択</span>
+                    <span className="text-xs text-amber-200/90 font-normal">（{ITEMS[packBoxItem.baseId]?.name}）</span>
+                  </h3>
+                  <div className="text-[10px] text-slate-400">
+                    同種アイテムはまとめて数量指定できます。梱包した箱はギルドショップに出品や保管が可能です。
+                  </div>
+                </div>
               </div>
-            </div>
-
-            {/* Helper Controls: Select All / Deselect All */}
-            {(() => {
-              const packableItems = inventory.filter(i => {
-                if (i.uid === packBoxItem.uid || i.isLocked || i.packedItems) return false;
-                const base = ITEMS[i.baseId];
-                if (!base) return false;
-                const maxPrice = packBoxItem.baseId === 'c_empty_box_c' ? 10000 : packBoxItem.baseId === 'c_empty_box_b' ? 100000 : 999999999;
-                return base.price <= maxPrice;
-              });
-
-              return (
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="text-xs font-bold text-amber-300">
-                    選択中: <span className="text-white text-sm">{selectedPackItemUids.length}</span> 個
-                  </div>
-                  <div className="flex gap-1.5">
-                    <button
-                      onClick={() => {
-                        setSelectedPackItemUids(packableItems.map(i => i.uid));
-                      }}
-                      disabled={packableItems.length === 0}
-                      className="pixel-btn text-[10px] !py-0.5 !px-2 !bg-slate-800 text-amber-300 border border-slate-600 disabled:opacity-50"
-                    >
-                      ✅ すべて選択 ({packableItems.length})
-                    </button>
-                    <button
-                      onClick={() => setSelectedPackItemUids([])}
-                      disabled={selectedPackItemUids.length === 0}
-                      className="pixel-btn text-[10px] !py-0.5 !px-2 !bg-slate-800 text-slate-300 border border-slate-600 disabled:opacity-50"
-                    >
-                      ❌ 選択解除
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
-            
-            <div className="flex-1 overflow-y-auto pr-1 bg-slate-950 p-2 border border-slate-700 rounded mb-3 space-y-1">
-              {inventory.filter(i => i.uid !== packBoxItem.uid && !i.isLocked && !i.packedItems).length === 0 ? (
-                <div className="text-center py-8 text-slate-500 text-xs">
-                  詰めることができるアイテムを持っていません。
-                </div>
-              ) : (
-                inventory.filter(i => i.uid !== packBoxItem.uid && !i.isLocked && !i.packedItems).map(item => {
-                  const base = ITEMS[item.baseId];
-                  if (!base) return null;
-                  const maxPrice = packBoxItem.baseId === 'c_empty_box_c' ? 10000 : packBoxItem.baseId === 'c_empty_box_b' ? 100000 : 999999999;
-                  const canPack = base.price <= maxPrice;
-                  const isSelected = selectedPackItemUids.includes(item.uid);
-                  
-                  return (
-                    <div 
-                      key={item.uid}
-                      onClick={() => {
-                         if (!canPack) return;
-                         if (isSelected) {
-                           setSelectedPackItemUids(prev => prev.filter(uid => uid !== item.uid));
-                         } else {
-                           setSelectedPackItemUids(prev => [...prev, item.uid]);
-                         }
-                      }}
-                      className={`flex items-center justify-between p-2 rounded border transition-colors ${
-                        canPack 
-                          ? isSelected 
-                            ? 'bg-amber-950/70 border-amber-400 cursor-pointer shadow-sm' 
-                            : 'bg-slate-900 border-slate-700 cursor-pointer hover:border-slate-500'
-                          : 'bg-slate-900/50 opacity-50 border-rose-950 cursor-not-allowed'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] ${
-                          isSelected ? 'bg-amber-500 border-amber-300 text-slate-950 font-bold' : 'border-slate-600 bg-slate-950'
-                        }`}>
-                          {isSelected ? '✓' : ''}
-                        </div>
-                        <div className="text-xs text-slate-200 truncate">
-                          <span style={{ color: base.color }}>{base.name}</span>
-                          {item.upgradeLevel ? ` +${item.upgradeLevel}` : ''}
-                          {!canPack && <span className="ml-2 text-[10px] text-rose-400">ランク上限オーバー</span>}
-                        </div>
-                      </div>
-                      <div className="text-[10px] text-slate-400 flex-shrink-0 ml-2">
-                        🪙 {base.price.toLocaleString()} G
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-            
-            <div className="flex gap-2">
               <button
                 onClick={() => {
                   setPackBoxItem(null);
                   setSelectedPackItemUids([]);
                 }}
-                className="pixel-btn flex-1 !bg-slate-800 hover:!bg-slate-700 text-slate-300 text-xs"
+                className="text-slate-400 hover:text-white font-bold px-2 py-0.5 rounded text-sm hover:bg-slate-800"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* 箱の制限 ＆ サマリー */}
+            {(() => {
+              const maxPrice = packBoxItem.baseId === 'c_empty_box_c' ? 10000 : packBoxItem.baseId === 'c_empty_box_b' ? 100000 : 999999999;
+              const maxPriceText = maxPrice >= 999999999 ? '上限なし (全ランク対応)' : `単価 ${maxPrice.toLocaleString()} G 以下`;
+              const packableUids = filteredPackGroups.filter(g => g.canPack).flatMap(g => g.uids);
+
+              return (
+                <div className="mb-2 shrink-0 space-y-2">
+                  <div className="flex items-center justify-between text-xs bg-slate-950/80 p-2 rounded border border-slate-800">
+                    <div className="flex items-center gap-3">
+                      <span className="text-amber-300 font-bold">
+                        選択中: <span className="text-white text-sm font-mono">{selectedPackItemUids.length}</span> 個
+                      </span>
+                      <span className="text-slate-400 text-[11px]">
+                        総価値: <span className="text-amber-300 font-bold">🪙 {selectedPackTotalPrice.toLocaleString()} G</span>
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                      価格制限: <span className="text-amber-300 font-medium">{maxPriceText}</span>
+                    </div>
+                  </div>
+
+                  {/* カテゴリ切り替え & 一括選択ボタン */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex gap-1">
+                      {[
+                        { id: 'all', label: 'すべて' },
+                        { id: 'materials', label: '💎 素材・宝石' },
+                        { id: 'consumables', label: '🧪 道具・宝箱' },
+                        { id: 'equipment', label: '⚔️ 装備品' }
+                      ].map(tabItem => (
+                        <button
+                          key={tabItem.id}
+                          onClick={() => setPackCategory(tabItem.id as any)}
+                          className={`text-[10px] px-2.5 py-1 rounded font-bold transition-colors ${
+                            packCategory === tabItem.id 
+                              ? 'bg-amber-600 text-white shadow' 
+                              : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          {tabItem.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => {
+                          const currentPackable = filteredPackGroups.filter(g => g.canPack).flatMap(g => g.uids);
+                          setSelectedPackItemUids(prev => Array.from(new Set([...prev, ...currentPackable])));
+                        }}
+                        disabled={packableUids.length === 0}
+                        className="pixel-btn text-[10px] !py-0.5 !px-2 !bg-slate-800 text-amber-300 border border-slate-700 disabled:opacity-40"
+                      >
+                        ✅ 表示中を全選択
+                      </button>
+                      <button
+                        onClick={() => {
+                          const currentTabUids = new Set(filteredPackGroups.flatMap(g => g.uids));
+                          setSelectedPackItemUids(prev => prev.filter(uid => !currentTabUids.has(uid)));
+                        }}
+                        disabled={selectedPackItemUids.length === 0}
+                        className="pixel-btn text-[10px] !py-0.5 !px-2 !bg-slate-800 text-slate-300 border border-slate-700 disabled:opacity-40"
+                      >
+                        ❌ 解除
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* アイテムリスト（グループ化） */}
+            <div className="flex-1 overflow-y-auto pr-1 bg-slate-950/70 p-2 border border-slate-800 rounded mb-3 space-y-1.5">
+              {filteredPackGroups.length === 0 ? (
+                <div className="text-center py-12 text-slate-500 text-xs">
+                  <p className="text-2xl mb-1">📦</p>
+                  詰めることができるアイテムがありません。
+                </div>
+              ) : (
+                filteredPackGroups.map(group => {
+                  const selectedUidsInGroup = group.uids.filter(uid => selectedPackItemUids.includes(uid));
+                  const selCount = selectedUidsInGroup.length;
+                  const isAllSelected = selCount === group.totalCount && group.totalCount > 0;
+
+                  return (
+                    <div
+                      key={group.key}
+                      className={`p-2 rounded border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+                        !group.canPack
+                          ? 'bg-slate-900/40 opacity-50 border-rose-950/50'
+                          : selCount > 0
+                            ? 'bg-amber-950/50 border-amber-500/80 shadow-[0_0_8px_rgba(245,158,11,0.15)]'
+                            : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      {/* Left: Item Info */}
+                      <div 
+                        className={`flex items-center gap-2.5 min-w-0 flex-1 ${group.canPack && group.totalCount === 1 ? 'cursor-pointer' : ''}`}
+                        onClick={() => {
+                          if (!group.canPack) return;
+                          if (group.totalCount === 1) {
+                            handleSetGroupPackCount(group.uids, selCount > 0 ? 0 : 1);
+                          }
+                        }}
+                      >
+                        <div className="p-0.5 bg-slate-950 border border-slate-800 rounded shrink-0">
+                          <ItemIcon item={group.item} size={28} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold truncate" style={{ color: group.color || '#e2e8f0' }}>
+                              {group.name}
+                            </span>
+                            {group.upgradeLevel ? (
+                              <span className="text-[10px] text-amber-300 font-bold">+{group.upgradeLevel}</span>
+                            ) : null}
+                            <span className="text-[10px] text-slate-400 bg-slate-950 px-1 py-0.2 rounded border border-slate-800">
+                              所持: <span className="text-slate-200 font-bold">{group.totalCount}</span>
+                            </span>
+                            {!group.canPack && (
+                              <span className="text-[9px] text-rose-400 bg-rose-950/80 border border-rose-800 px-1 rounded font-bold">
+                                上限超過
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
+                            <span>単価: 🪙 {group.price.toLocaleString()} G</span>
+                            {selCount > 0 && (
+                              <span className="text-amber-300 font-bold">
+                                （小計: 🪙 {(group.price * selCount).toLocaleString()} G）
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: Quantity Controls */}
+                      {group.canPack && (
+                        <div className="flex items-center justify-between sm:justify-end gap-1.5 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-slate-800/80">
+                          <div className="text-xs font-bold flex items-center gap-1">
+                            <span className={`px-1.5 py-0.5 rounded text-[11px] font-mono ${
+                              selCount > 0 ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-950 text-slate-400 border border-slate-800'
+                            }`}>
+                              {selCount} / {group.totalCount}
+                            </span>
+                          </div>
+
+                          {group.totalCount === 1 ? (
+                            <button
+                              type="button"
+                              onClick={() => handleSetGroupPackCount(group.uids, selCount > 0 ? 0 : 1)}
+                              className={`text-xs px-3 py-1 rounded font-bold border transition-colors ${
+                                selCount > 0
+                                  ? 'bg-amber-600 border-amber-400 text-white'
+                                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
+                              }`}
+                            >
+                              {selCount > 0 ? '✓ 選択中' : '選択'}
+                            </button>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              {group.totalCount >= 10 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetGroupPackCount(group.uids, selCount - 10)}
+                                  disabled={selCount < 10}
+                                  className="pixel-btn text-[10px] !py-0.5 !px-1.5 !bg-slate-800 disabled:opacity-30 text-slate-200"
+                                >
+                                  -10
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleSetGroupPackCount(group.uids, selCount - 1)}
+                                disabled={selCount === 0}
+                                className="pixel-btn text-[10px] !py-0.5 !px-1.5 !bg-slate-800 disabled:opacity-30 text-slate-200"
+                              >
+                                -1
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSetGroupPackCount(group.uids, selCount + 1)}
+                                disabled={selCount >= group.totalCount}
+                                className="pixel-btn text-[10px] !py-0.5 !px-1.5 !bg-slate-800 disabled:opacity-30 text-amber-300 font-bold"
+                              >
+                                +1
+                              </button>
+                              {group.totalCount >= 10 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetGroupPackCount(group.uids, selCount + 10)}
+                                  disabled={selCount >= group.totalCount}
+                                  className="pixel-btn text-[10px] !py-0.5 !px-1.5 !bg-slate-800 disabled:opacity-30 text-amber-300 font-bold"
+                                >
+                                  +10
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleSetGroupPackCount(group.uids, isAllSelected ? 0 : group.totalCount)}
+                                className={`pixel-btn text-[10px] !py-0.5 !px-2 font-bold ${
+                                  isAllSelected
+                                    ? '!bg-slate-800 text-slate-400'
+                                    : '!bg-amber-600 hover:!bg-amber-500 text-white'
+                                }`}
+                              >
+                                {isAllSelected ? '解除' : '全数'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* フッター */}
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={() => {
+                  setPackBoxItem(null);
+                  setSelectedPackItemUids([]);
+                }}
+                className="pixel-btn flex-1 !bg-slate-800 hover:!bg-slate-700 text-slate-300 text-xs !py-2"
               >
                 キャンセル
               </button>
@@ -2161,9 +2568,259 @@ export const Inventory: React.FC<InventoryProps> = ({
                   setSelectedPackItemUids([]);
                 }}
                 disabled={selectedPackItemUids.length === 0}
-                className="pixel-btn flex-1 !bg-amber-600 hover:!bg-amber-500 text-white font-bold text-xs disabled:opacity-50 shadow-md"
+                className="pixel-btn flex-1 !bg-amber-600 hover:!bg-amber-500 text-white font-bold text-xs disabled:opacity-40 shadow-md !py-2"
               >
                 📦 梱包する ({selectedPackItemUids.length} 個)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 強化継承モーダル */}
+      {transferScrollUid && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="pixel-panel max-w-lg w-full bg-slate-900 border-2 border-purple-500 p-4 relative shadow-[0_0_30px_rgba(168,85,247,0.3)] max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">📜</span>
+                <div>
+                  <h3 className="text-sm font-bold text-purple-300">強化継承の秘伝書</h3>
+                  <p className="text-[10px] text-slate-400">強化値を抽出して別の同種武具へ引き継ぎます</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setTransferScrollUid(null);
+                  setTransferSourceUid('');
+                  setTransferTargetUid('');
+                }}
+                className="text-slate-400 hover:text-white font-bold px-2 py-0.5 rounded text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-purple-950/40 border border-purple-700/60 p-2.5 rounded mb-3 text-xs text-purple-200">
+              <p className="font-bold text-amber-300 mb-1">⚠️ 継承ルール・注意事項</p>
+              <ul className="list-disc list-inside space-y-0.5 text-[11px] text-slate-300">
+                <li><strong className="text-rose-400 font-bold">限界突破（凸数）は継承されません。</strong>継承先が元々持っている凸数は維持されます。</li>
+                <li>抽出元の装備品は<strong className="text-rose-400 font-bold">消滅</strong>します（ロック中の装備は選べません）。</li>
+                <li>同じ種類（武器同士、または防具同士）でのみ継承可能です。</li>
+                <li>基本強化値(+値)、特殊強化回数、スロット数、装着中の宝石が引き継がれます。</li>
+              </ul>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {/* ステップ1: 抽出元の選択 */}
+              <div>
+                <label className="text-xs font-bold text-rose-400 block mb-1">
+                  1. 抽出元の武具（※実行後に消滅します）
+                </label>
+                <select
+                  value={transferSourceUid}
+                  onChange={(e) => {
+                    setTransferSourceUid(e.target.value);
+                    setTransferTargetUid('');
+                  }}
+                  className="pixel-input text-xs w-full bg-slate-950 border border-slate-700 text-slate-200 p-2 rounded"
+                >
+                  <option value="">-- 抽出元の装備を選択してください --</option>
+                  {inventory
+                    .filter(i => (ITEMS[i.baseId]?.type === 'weapon' || ITEMS[i.baseId]?.type === 'armor') && !i.isLocked && !i.packedItems)
+                    .map(item => {
+                      const base = ITEMS[item.baseId];
+                      const typeLabel = base.type === 'weapon' ? '⚔️武器' : '🛡️防具';
+                      const plus = item.upgradeLevel > 0 ? ` +${item.upgradeLevel}` : '';
+                      const lb = (item.limitBreak || 0) > 0 ? ` (${item.limitBreak}凸:継承不可)` : '';
+                      const sp = (item.specialEnchantCount || 0) > 0 ? ` ★${item.specialEnchantCount}` : '';
+                      const sock = (item.unlockedSockets || 0) > 0 ? ` 穴${item.unlockedSockets}` : '';
+                      return (
+                        <option key={item.uid} value={item.uid}>
+                          [{typeLabel}] {base.name}{plus}{lb}{sp}{sock}
+                        </option>
+                      );
+                    })}
+                </select>
+              </div>
+
+              {/* ステップ2: 継承先の選択 */}
+              <div>
+                <label className="text-xs font-bold text-sky-400 block mb-1">
+                  2. 継承先の武具（強化を引き継ぐ装備）
+                </label>
+                <select
+                  value={transferTargetUid}
+                  onChange={(e) => setTransferTargetUid(e.target.value)}
+                  disabled={!transferSourceUid}
+                  className="pixel-input text-xs w-full bg-slate-950 border border-slate-700 text-slate-200 p-2 rounded disabled:opacity-40"
+                >
+                  <option value="">-- 継承先の装備を選択してください --</option>
+                  {transferSourceUid && (() => {
+                    const sourceItem = inventory.find(i => i.uid === transferSourceUid);
+                    if (!sourceItem) return null;
+                    const sourceType = ITEMS[sourceItem.baseId]?.type;
+                    return inventory
+                      .filter(i => i.uid !== transferSourceUid && ITEMS[i.baseId]?.type === sourceType && !i.packedItems)
+                      .map(item => {
+                        const base = ITEMS[item.baseId];
+                        const plus = item.upgradeLevel > 0 ? ` (現在+${item.upgradeLevel})` : '';
+                        const lb = (item.limitBreak || 0) > 0 ? ` (現在${item.limitBreak}凸:維持)` : '';
+                        return (
+                          <option key={item.uid} value={item.uid}>
+                            {base.name}{plus}{lb}
+                          </option>
+                        );
+                      });
+                  })()}
+                </select>
+              </div>
+
+              {/* プレビュー表示 */}
+              {transferSourceUid && transferTargetUid && (() => {
+                const s = inventory.find(i => i.uid === transferSourceUid);
+                const t = inventory.find(i => i.uid === transferTargetUid);
+                if (!s || !t) return null;
+                const sBase = ITEMS[s.baseId];
+                const tBase = ITEMS[t.baseId];
+                return (
+                  <div className="bg-slate-950 p-3 rounded border border-slate-800 text-xs space-y-2">
+                    <div className="font-bold text-amber-300 border-b border-slate-800 pb-1">
+                      🔍 継承結果プレビュー
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div className="p-2 bg-rose-950/30 rounded border border-rose-900/60">
+                        <div className="text-rose-400 font-bold mb-1">消滅: {sBase.name}</div>
+                        <div className="text-slate-400">強化: +{s.upgradeLevel || 0}</div>
+                        <div className="text-slate-400">限界突破: {s.limitBreak || 0}凸 (<span className="text-rose-400 font-bold">破棄</span>)</div>
+                        <div className="text-slate-400">特殊強化: ★{s.specialEnchantCount || 0}</div>
+                      </div>
+                      <div className="p-2 bg-sky-950/30 rounded border border-sky-900/60">
+                        <div className="text-sky-300 font-bold mb-1">強化後: {tBase.name}</div>
+                        <div className="text-amber-300 font-bold">強化: +{s.upgradeLevel || 0}</div>
+                        <div className="text-emerald-400 font-bold">限界突破: {t.limitBreak || 0}凸 (元のまま維持)</div>
+                        <div className="text-purple-300 font-bold">特殊強化: ★{s.specialEnchantCount || 0}</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="flex gap-2 pt-3 border-t border-slate-800 mt-2">
+              <button
+                onClick={() => {
+                  setTransferScrollUid(null);
+                  setTransferSourceUid('');
+                  setTransferTargetUid('');
+                }}
+                className="pixel-btn flex-1 !bg-slate-800 hover:!bg-slate-700 text-slate-300 text-xs"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => {
+                  if (onTransferEnhancements && transferSourceUid && transferTargetUid && transferScrollUid) {
+                    onTransferEnhancements(transferSourceUid, transferTargetUid, transferScrollUid);
+                    setTransferScrollUid(null);
+                    setTransferSourceUid('');
+                    setTransferTargetUid('');
+                  }
+                }}
+                disabled={!transferSourceUid || !transferTargetUid}
+                className="pixel-btn flex-1 !bg-purple-700 hover:!bg-purple-600 text-white font-bold text-xs disabled:opacity-40 shadow-lg"
+              >
+                📜 継承を実行する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ゲーム内ウィンドウ：特殊強化の素材選択モーダル */}
+      {isSpecialMaterialModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="pixel-panel max-w-lg w-full bg-slate-900 border-2 border-purple-500 p-4 relative shadow-[0_0_30px_rgba(168,85,247,0.3)] max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">💎</span>
+                <div>
+                  <h3 className="text-sm font-bold text-purple-300">特殊強化 素材の選択</h3>
+                  <p className="text-[10px] text-slate-400">注入するモンスター素材を選択してください</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsSpecialMaterialModalOpen(false)}
+                className="text-slate-400 hover:text-white font-bold px-2 py-0.5 rounded text-sm hover:bg-slate-800"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-1">
+              {enchantableMaterials.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400 bg-slate-950/60 rounded border border-slate-800">
+                  <p className="text-base mb-1">📦</p>
+                  <p>特殊強化に使用できるモンスター素材がありません。</p>
+                  <p className="text-[10px] text-slate-500 mt-1">（ボス討伐やステージ攻略でドロップします）</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {enchantableMaterials.map(mat => {
+                    const isSelected = selectedMaterialBaseId === mat.baseId;
+                    const info = MATERIAL_ENCHANT_INFO[mat.baseId];
+                    return (
+                      <button
+                        key={mat.baseId}
+                        type="button"
+                        onClick={() => {
+                          setSelectedMaterialBaseId(mat.baseId);
+                          setSelectedMaterialUid(mat.sampleUid);
+                          setIsSpecialMaterialModalOpen(false);
+                        }}
+                        className={`pixel-panel p-2.5 rounded text-left transition-all flex items-start gap-2.5 border-2 ${
+                          isSelected 
+                            ? 'bg-purple-950/80 border-purple-400 shadow-[0_0_14px_rgba(168,85,247,0.4)] ring-1 ring-purple-400' 
+                            : 'bg-slate-950/90 border-slate-800 hover:border-slate-600 hover:bg-slate-900/90'
+                        }`}
+                      >
+                        <div className="p-1 bg-slate-900 border border-slate-800 rounded shrink-0">
+                          <ItemIcon item={mat.item} size={32} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1 mb-0.5">
+                            <span className="font-bold text-xs text-slate-100 truncate">{mat.name}</span>
+                            <span className="text-[11px] font-bold text-purple-300 shrink-0">
+                              x{mat.count}
+                            </span>
+                          </div>
+                          {info && (
+                            <div className="text-[10px] text-amber-300 font-semibold mb-1">
+                              {info.badge}
+                            </div>
+                          )}
+                          <div className="text-[9px] text-slate-400 leading-relaxed">
+                            {info ? info.desc(1) : mat.item.effect?.description || '武具の能力を強化'}
+                          </div>
+                          {isSelected && (
+                            <div className="mt-1 text-[9px] text-purple-300 font-bold flex items-center gap-1">
+                              <span>✓</span> 選択中
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 pt-2.5 border-t border-slate-800 flex justify-end shrink-0">
+              <button
+                onClick={() => setIsSpecialMaterialModalOpen(false)}
+                className="pixel-btn text-xs !bg-slate-800 hover:!bg-slate-700 text-slate-200 !py-1 !px-4"
+              >
+                閉じる
               </button>
             </div>
           </div>

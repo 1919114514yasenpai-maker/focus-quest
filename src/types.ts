@@ -33,6 +33,14 @@ export interface MonsterDrop {
   chance: number;
 }
 
+export interface CraftingRecipe {
+  id: string;
+  resultItemId: string;
+  category: 'weapon' | 'armor' | 'consumable';
+  materials: { baseId: string; amount: number; artisanAmount?: number }[];
+  cost?: number;
+}
+
 export interface Monster {
   id: string;
   name: string;

@@ -1,4 +1,4 @@
-import { GameItem, Monster, PlayerItem, ItemType, MonsterDrop } from './types';
+import { GameItem, Monster, PlayerItem, ItemType, MonsterDrop, CraftingRecipe } from './types';
 
 export const ITEMS: Record<string, GameItem> = {
   // --- 武器 (WEAPONS) ---
@@ -497,7 +497,7 @@ export const ITEMS: Record<string, GameItem> = {
     power: 0,
     price: 30000000,
     color: '#a855f7',
-    effect: { description: '【ショップ限定品】元の武器・防具から強化した部分（基本強化値・限界突破・特殊強化・開けた穴・はめた宝石）だけを抜き取り、別の同じ種類の装備に移せる。抽出元の装備品は消滅する。' }
+    effect: { description: '【ショップ限定品】元の武器・防具から強化した部分（基本強化値・特殊強化・開けた穴・はめた宝石）だけを抜き取り、別の同じ種類の装備に移せる。※限界突破(凸)は継承されません。抽出元の装備品は消滅する。' }
   },
   'c_curse_breaker': {
     id: 'c_curse_breaker',
@@ -671,3 +671,75 @@ export const isCraftExclusiveItem = (itemOrId: GameItem | string | undefined | n
   if (item?.effect?.description?.includes('クラフト限定') || item?.effect?.description?.includes('深層クラフト限定')) return true;
   return false;
 };
+
+export const CRAFTING_RECIPES: CraftingRecipe[] = [
+  {
+    id: 'w_craft_ragnarok',
+    resultItemId: 'w_craft_ragnarok',
+    category: 'weapon',
+    materials: [
+      { baseId: 'm_slime_jelly', amount: 50, artisanAmount: 40 },
+      { baseId: 'm_goblin_ear', amount: 50, artisanAmount: 40 },
+      { baseId: 'm_orc_fang', amount: 50, artisanAmount: 40 },
+      { baseId: 'm_demon_horn', amount: 50, artisanAmount: 40 },
+      { baseId: 'm_dragon_scale', amount: 50, artisanAmount: 40 },
+      { baseId: 'g_fire_ruby', amount: 5, artisanAmount: 4 },
+      { baseId: 'g_water_sapphire', amount: 5, artisanAmount: 4 },
+      { baseId: 'g_thunder_topaz', amount: 5, artisanAmount: 4 },
+      { baseId: 'g_light_diamond', amount: 5, artisanAmount: 4 },
+      { baseId: 'g_dark_onyx', amount: 5, artisanAmount: 4 }
+    ],
+    cost: 0
+  },
+  {
+    id: 'a_craft_aegis',
+    resultItemId: 'a_craft_aegis',
+    category: 'armor',
+    materials: [
+      { baseId: 'm_slime_jelly', amount: 50, artisanAmount: 40 },
+      { baseId: 'm_goblin_ear', amount: 50, artisanAmount: 40 },
+      { baseId: 'm_orc_fang', amount: 50, artisanAmount: 40 },
+      { baseId: 'm_demon_horn', amount: 50, artisanAmount: 40 },
+      { baseId: 'm_dragon_scale', amount: 50, artisanAmount: 40 },
+      { baseId: 'g_fire_ruby', amount: 5, artisanAmount: 4 },
+      { baseId: 'g_water_sapphire', amount: 5, artisanAmount: 4 },
+      { baseId: 'g_thunder_topaz', amount: 5, artisanAmount: 4 },
+      { baseId: 'g_light_diamond', amount: 5, artisanAmount: 4 },
+      { baseId: 'g_dark_onyx', amount: 5, artisanAmount: 4 }
+    ],
+    cost: 0
+  },
+  {
+    id: 'w_deep_sword',
+    resultItemId: 'w_deep_sword',
+    category: 'weapon',
+    materials: [
+      { baseId: 'm_deep_crystal', amount: 10, artisanAmount: 8 },
+      { baseId: 'm_abyss_core', amount: 2, artisanAmount: 1 }
+    ],
+    cost: 0
+  },
+  {
+    id: 'a_deep_armor',
+    resultItemId: 'a_deep_armor',
+    category: 'armor',
+    materials: [
+      { baseId: 'm_deep_crystal', amount: 10, artisanAmount: 8 },
+      { baseId: 'm_abyss_core', amount: 2, artisanAmount: 1 }
+    ],
+    cost: 0
+  },
+  {
+    id: 'c_curse_breaker',
+    resultItemId: 'c_curse_breaker',
+    category: 'consumable',
+    materials: [
+      { baseId: 'm_slime_jelly', amount: 10, artisanAmount: 8 },
+      { baseId: 'm_goblin_ear', amount: 10, artisanAmount: 8 },
+      { baseId: 'm_orc_fang', amount: 10, artisanAmount: 8 },
+      { baseId: 'm_demon_horn', amount: 10, artisanAmount: 8 },
+      { baseId: 'm_dragon_scale', amount: 10, artisanAmount: 8 }
+    ],
+    cost: 0
+  }
+];

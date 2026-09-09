@@ -8,7 +8,7 @@ import { JobSelectModal } from './components/JobSelectModal';
 import { GuildRanking } from './components/GuildRanking';
 import { AuctionHouse } from './components/AuctionHouse';
 import { PlayerStats, EquipmentState, SaveData, Monster, PlayerItem, ChestReward, JobType } from './types';
-import { INITIAL_INVENTORY, ITEMS, getNextLevelXp, getMonsterForStage, generateUid } from './gameData';
+import { INITIAL_INVENTORY, ITEMS, getNextLevelXp, getMonsterForStage, generateUid, CRAFTING_RECIPES } from './gameData';
 import { getCompiledItem } from './itemUtils';
 import { generateChestReward, getChestForFocusMinutes } from './chestUtils';
 import { loadSaveDataFromLocalStorage, sanitizeSaveData, CURRENT_SAVE_KEY } from './saveManager';
@@ -720,42 +720,39 @@ export default function App() {
   };
 
   const handleCraftItem = (targetBaseId: string) => {
-    let requiredMaterials: { id: string, count: number }[] = [];
-    let extraProps: Partial<PlayerItem> = {};
-    let targetBaseIdToCraft = targetBaseId;
+    const recipe = CRAFTING_RECIPES.find(r => r.id === targetBaseId || r.resultItemId === targetBaseId);
+    if (!recipe) {
+      showToast(`⚠️ レシピが見つかりません。`);
+      return;
+    }
 
-    if (targetBaseId === 'c_curse_breaker') {
-      const requiredCount = stats.job === 'artisan' ? 8 : 10;
-      requiredMaterials = ['m_slime_jelly', 'm_goblin_ear', 'm_orc_fang', 'm_demon_horn', 'm_dragon_scale'].map(id => ({ id, count: requiredCount }));
-    } else if (targetBaseId === 'w_craft_ragnarok' || targetBaseId === 'a_craft_aegis') {
-      const matCount = stats.job === 'artisan' ? 40 : 50;
-      const gemCount = stats.job === 'artisan' ? 4 : 5;
-      requiredMaterials = [
-        ...['m_slime_jelly', 'm_goblin_ear', 'm_orc_fang', 'm_demon_horn', 'm_dragon_scale'].map(id => ({ id, count: matCount })),
-        ...['g_fire_ruby', 'g_water_sapphire', 'g_thunder_topaz', 'g_light_diamond', 'g_dark_onyx'].map(id => ({ id, count: gemCount }))
-      ];
-    } else if (targetBaseId === 'w_deep_sword' || targetBaseId === 'a_deep_armor') {
-      const crystalCount = stats.job === 'artisan' ? 8 : 10;
-      const coreCount = stats.job === 'artisan' ? 1 : 2;
-      requiredMaterials = [
-        { id: 'm_deep_crystal', count: crystalCount },
-        { id: 'm_abyss_core', count: coreCount }
-      ];
+    const isArtisan = stats.job === 'artisan';
+    const targetBaseIdToCraft = recipe.resultItemId;
+    let extraProps: Partial<PlayerItem> = {};
+
+    if (targetBaseIdToCraft === 'w_deep_sword' || targetBaseIdToCraft === 'a_deep_armor') {
       const deepBonus = Math.floor(stats.maxStageReached * 1.5);
       extraProps.addedPower = deepBonus;
       extraProps.engraving = auth.currentUser?.displayName || '名無し勇者';
-    } else {
-      return; // Unknown recipe
     }
 
-    const materialCounts: Record<string, number> = {};
+    const requiredMaterials = recipe.materials.map(m => ({
+      id: m.baseId,
+      count: isArtisan && m.artisanAmount ? m.artisanAmount : m.amount
+    }));
+
+    const availableMaterialCounts: Record<string, number> = {};
     inventory.forEach(item => {
-      materialCounts[item.baseId] = (materialCounts[item.baseId] || 0) + 1;
+      if (!item.isLocked && !item.packedItems) {
+        availableMaterialCounts[item.baseId] = (availableMaterialCounts[item.baseId] || 0) + 1;
+      }
     });
 
     for (const req of requiredMaterials) {
-      if ((materialCounts[req.id] || 0) < req.count) {
-        showToast(`⚠️ 素材が足りません。(${ITEMS[req.id].name}があと${req.count - (materialCounts[req.id] || 0)}個必要)`);
+      const has = availableMaterialCounts[req.id] || 0;
+      if (has < req.count) {
+        const matName = ITEMS[req.id]?.name || req.id;
+        showToast(`⚠️ 素材が足りません。(${matName}があと${req.count - has}個必要)`);
         return;
       }
     }
@@ -765,7 +762,7 @@ export default function App() {
       requiredMaterials.forEach(req => {
         let count = req.count;
         nextInv = nextInv.filter(item => {
-          if (item.baseId === req.id && count > 0 && !item.isLocked) {
+          if (item.baseId === req.id && count > 0 && !item.isLocked && !item.packedItems) {
             count--;
             return false;
           }
@@ -777,6 +774,7 @@ export default function App() {
         { uid: generateUid(), baseId: targetBaseIdToCraft, upgradeLevel: 0, addedPower: 0, ...extraProps }
       ];
     });
+
     showToast(`✨ 「${ITEMS[targetBaseIdToCraft].name}」をクラフトしました！`);
   };
 
@@ -808,7 +806,8 @@ export default function App() {
         return {
           ...i,
           upgradeLevel: source.upgradeLevel || 0,
-          limitBreak: source.limitBreak || 0,
+          // 凸（限界突破）は継承せず、継承先アイテム本来の凸数を維持
+          limitBreak: i.limitBreak || 0,
           addedPower: source.addedPower || 0,
           addedEffect: source.addedEffect,
           specialEnchantCount: source.specialEnchantCount || 0,
@@ -819,7 +818,7 @@ export default function App() {
       return i;
     }).filter(i => i.uid !== sourceUid && i.uid !== scrollUid));
     
-    showToast(`✨ 「${ITEMS[source.baseId].name}」から「${ITEMS[target.baseId].name}」へ強化状態を継承しました！`);
+    showToast(`✨ 「${ITEMS[source.baseId].name}」から「${ITEMS[target.baseId].name}」へ強化状態を継承しました！（※凸・限界突破は継承されません）`);
   };
 
   
@@ -1081,7 +1080,7 @@ export default function App() {
   const currentJobDef = JOBS[stats.job || 'balanced'];
 
   return (
-    <div className="relative w-full h-[100dvh] min-h-[100dvh] max-h-[100dvh] bg-slate-950 overflow-hidden flex flex-col font-['DotGothic16'] select-none">
+    <div className="relative w-full h-[100dvh] min-h-[100dvh] bg-slate-950 overflow-y-auto overflow-x-hidden flex flex-col font-['DotGothic16'] select-none">
       {toastMessage && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 pointer-events-none max-w-md w-[92%] bg-slate-900/95 border-2 border-amber-400 text-amber-200 px-3 py-2 rounded-xl shadow-[0_0_20px_rgba(245,158,11,0.4)] flex items-center gap-2 animate-bounce">
           <span className="text-lg">✨</span>
@@ -1123,55 +1122,56 @@ export default function App() {
         />
       </div>
 
-      <div className="relative z-10 w-full p-2 sm:p-4 flex flex-wrap justify-between items-start pointer-events-none gap-2">
-        <div className="pixel-panel w-full sm:w-72 max-w-full pointer-events-auto bg-slate-900/90 border-slate-700 p-2 sm:p-3">
-          <div className="flex justify-between items-center mb-1.5 gap-1">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs sm:text-sm text-amber-300 font-bold">勇者 Lv.{stats.level}</span>
-              <span className="text-[10px] sm:text-xs text-indigo-300 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-700/60 font-medium">
-                {currentJobDef.icon} {currentJobDef.name}
+      <div className="relative z-10 w-full p-1.5 sm:p-4 flex flex-row justify-between items-start pointer-events-none gap-1.5 sm:gap-3">
+        {/* Status Panel */}
+        <div className="pixel-panel flex-1 min-w-0 pointer-events-auto bg-slate-900/90 border-slate-700 p-1.5 sm:p-3">
+          <div className="flex justify-between items-center mb-1 gap-1">
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="text-[11px] sm:text-sm text-amber-300 font-bold truncate">勇者 Lv.{stats.level}</span>
+              <span className="text-[9px] sm:text-xs text-indigo-300 bg-indigo-950/80 px-1 py-0.5 rounded border border-indigo-700/60 font-medium whitespace-nowrap">
+                {currentJobDef.icon} <span className="hidden xs:inline">{currentJobDef.name}</span>
               </span>
             </div>
             <button
               onClick={() => setShowStageSelect(true)}
-              className="pixel-btn text-[10px] !py-0.5 !px-2 active !border-sky-400 !text-sky-300 hover:!bg-sky-950 flex items-center gap-1"
+              className="pixel-btn text-[9px] sm:text-[10px] !py-0.5 !px-1.5 active !border-sky-400 !text-sky-300 hover:!bg-sky-950 flex items-center gap-1 flex-shrink-0"
               title="一度到達した階層に移動"
             >
               <span>地下 {stats.stage} 階</span>
-              <span className="text-[9px] bg-sky-950 px-1 rounded border border-sky-700">移動 🗺️</span>
+              <span className="text-[8px] sm:text-[9px] bg-sky-950 px-0.5 rounded border border-sky-700">移動 🗺️</span>
             </button>
           </div>
 
-          <div className="text-[10px] sm:text-[11px] text-rose-400 font-bold flex justify-between mb-0.5">
+          <div className="text-[9px] sm:text-[11px] text-rose-400 font-bold flex justify-between mb-0.5">
             <span>HP (自動回復中)</span>
             <span>{stats.hp} / {stats.maxHp}</span>
           </div>
-          <div className="w-full bg-slate-950 h-2.5 sm:h-3 border border-slate-700 rounded-sm mb-1.5">
+          <div className="w-full bg-slate-950 h-2 sm:h-3 border border-slate-700 rounded-sm mb-1">
             <div 
               className="bg-rose-500 h-full shadow-[0_0_8px_#f43f5e] transition-all duration-300" 
               style={{ width: `${hpPercent}%` }} 
             />
           </div>
 
-          <div className="text-[10px] sm:text-[11px] text-amber-300 font-bold flex justify-between mb-0.5">
+          <div className="text-[9px] sm:text-[11px] text-amber-300 font-bold flex justify-between mb-0.5">
             <span>EXP</span>
             <span>{stats.xp} / {nextLevelXp}</span>
           </div>
-          <div className="w-full bg-slate-950 h-2 border border-slate-700 rounded-sm mb-1.5">
+          <div className="w-full bg-slate-950 h-1.5 sm:h-2 border border-slate-700 rounded-sm mb-1">
             <div 
               className="bg-amber-400 h-full shadow-[0_0_8px_#fbbf24] transition-all duration-300" 
               style={{ width: `${xpPercent}%` }} 
             />
           </div>
 
-          <div className="flex justify-between items-center text-[11px] sm:text-xs text-amber-200 pt-1 border-t border-slate-800">
-            <span>🪙 所持金: {stats.gold} G</span>
+          <div className="flex justify-between items-center text-[10px] sm:text-xs text-amber-200 pt-0.5 border-t border-slate-800">
+            <span className="truncate">🪙 所持金: {stats.gold.toLocaleString()} G</span>
           </div>
 
           {activeEffects.length > 0 && (
-            <div className="mt-1.5 pt-1.5 border-t border-slate-800 flex flex-wrap gap-1">
+            <div className="mt-1 pt-1 border-t border-slate-800 flex flex-nowrap overflow-x-auto gap-1 py-0.5 no-scrollbar max-w-full">
               {activeEffects.map((eff, i) => (
-                <span key={i} className="text-[9px] sm:text-[10px] bg-slate-950 text-sky-300 px-1 py-0.5 border border-slate-800 rounded">
+                <span key={i} className="text-[8px] sm:text-[10px] bg-slate-950 text-sky-300 px-1 py-0.5 border border-slate-800 rounded whitespace-nowrap flex-shrink-0">
                   ✨ {eff}
                 </span>
               ))}
@@ -1179,24 +1179,25 @@ export default function App() {
           )}
         </div>
 
-        <div className="pixel-panel text-center pointer-events-auto min-w-[160px] sm:min-w-[180px] bg-slate-900/90 border-slate-700 flex flex-col items-center p-2 sm:p-3 mx-auto sm:mx-0">
-          <div className="text-[11px] sm:text-xs text-slate-400 mb-0.5">
-            {timerMode === 'idle' ? '待機中' : timerMode === 'focus' ? '⚔️ 集中クエスト中' : '☕ 休憩中'}
+        {/* Timer Panel */}
+        <div className="pixel-panel text-center pointer-events-auto w-36 sm:w-48 flex-shrink-0 bg-slate-900/90 border-slate-700 flex flex-col items-center p-1.5 sm:p-3">
+          <div className="text-[10px] sm:text-xs text-slate-400 mb-0.5">
+            {timerMode === 'idle' ? '待機中' : timerMode === 'focus' ? '⚔️ 集中中' : '☕ 休憩中'}
           </div>
-          <div className={`text-xl sm:text-2xl font-bold ${timerMode === 'focus' ? 'text-rose-400' : timerMode === 'break' ? 'text-emerald-400' : 'text-slate-200'}`}>
+          <div className={`text-lg sm:text-2xl font-bold tracking-tight ${timerMode === 'focus' ? 'text-rose-400' : timerMode === 'break' ? 'text-emerald-400' : 'text-slate-200'}`}>
             {formatTime(timeLeft)}
           </div>
 
           {/* クエスト時間の変更コントロール */}
           {timerMode === 'idle' && (
-            <div className="mt-1.5 pt-1.5 border-t border-slate-800 w-full flex flex-col items-center gap-1">
-              <div className="text-[10px] text-slate-400 font-bold">⏱️ 集中時間</div>
-              <div className="flex items-center gap-0.5 sm:gap-1">
+            <div className="mt-1 pt-1 border-t border-slate-800 w-full flex flex-col items-center gap-0.5">
+              <div className="text-[9px] sm:text-[10px] text-slate-400 font-bold">⏱️ 集中時間</div>
+              <div className="flex items-center justify-center flex-wrap gap-0.5">
                 {[15, 25, 30, 45, 60].map(m => (
                   <button
                     key={m}
                     onClick={() => updateFocusMinutes(m)}
-                    className={`px-1 py-0.5 text-[9px] sm:text-[10px] border rounded transition-colors ${
+                    className={`px-1 py-0.5 text-[8px] sm:text-[10px] border rounded transition-colors ${
                       focusMinutes === m 
                         ? 'border-amber-400 bg-amber-950/60 text-amber-300 font-bold' 
                         : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'
@@ -1206,25 +1207,25 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              <div className="flex items-center gap-1 mt-0.5">
+              <div className="flex items-center justify-center gap-1 mt-0.5">
                 <input
                   type="number"
                   min={1}
                   max={180}
                   value={focusMinutes}
                   onChange={(e) => updateFocusMinutes(parseInt(e.target.value, 10) || 1)}
-                  className="w-10 sm:w-12 bg-slate-950 border border-slate-700 text-amber-300 text-[10px] sm:text-[11px] text-center rounded px-1 py-0.5 focus:outline-none focus:border-amber-400"
+                  className="w-8 sm:w-12 bg-slate-950 border border-slate-700 text-amber-300 text-[9px] sm:text-[11px] text-center rounded px-0.5 py-0.5 focus:outline-none focus:border-amber-400"
                 />
-                <span className="text-[9px] sm:text-[10px] text-slate-400">分に設定</span>
+                <span className="text-[8px] sm:text-[10px] text-slate-400">分に設定</span>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      <div className="mt-auto relative z-10 p-2 sm:p-3 pb-3 flex flex-col items-center gap-2 pointer-events-auto w-full max-w-md mx-auto">
+      <div className="mt-auto relative z-10 p-2 pb-2 sm:pb-3 flex flex-col items-center gap-1.5 pointer-events-auto w-full max-w-md mx-auto flex-shrink-0">
         {/* Main Quest Action */}
-        <div className="w-full flex flex-col gap-2">
+        <div className="w-full flex flex-col gap-1.5">
           {timerMode === 'idle' ? (
             <>
               <div className="flex flex-col gap-1 w-full">
@@ -1233,12 +1234,12 @@ export default function App() {
                   placeholder="これからやる目標・タスクを入力（任意）"
                   value={currentTaskText}
                   onChange={(e) => setCurrentTaskText(e.target.value)}
-                  className="pixel-input text-xs w-full p-2 bg-slate-900 border border-slate-700 text-slate-200 placeholder-slate-500 rounded"
+                  className="pixel-input text-xs w-full py-1.5 px-2 bg-slate-900/90 border border-slate-700 text-slate-200 placeholder-slate-500 rounded"
                 />
               </div>
               <button
                 onClick={handleStartFocus}
-                className="pixel-btn active text-xs sm:text-sm w-full py-2.5 sm:py-3 shadow-lg flex items-center justify-center gap-2 font-bold mt-1"
+                className="pixel-btn active text-xs sm:text-sm w-full py-2 sm:py-2.5 shadow-md flex items-center justify-center gap-1.5 font-bold"
               >
                 <span>⚔️</span> 集中クエスト開始 ({focusMinutes}分)
               </button>
@@ -1246,7 +1247,7 @@ export default function App() {
           ) : timerMode === 'focus' ? (
             <div className="flex flex-col gap-1 w-full">
               {currentTaskText && (
-                <div className="text-[10px] sm:text-xs text-amber-200 bg-amber-950/40 p-2 rounded border border-amber-800 text-center truncate">
+                <div className="text-[10px] sm:text-xs text-amber-200 bg-amber-950/40 py-1 px-2 rounded border border-amber-800 text-center truncate">
                   🎯 目標: {currentTaskText}
                 </div>
               )}
@@ -1261,7 +1262,7 @@ export default function App() {
                   return (
                     <button
                       onClick={handleStop}
-                      className="pixel-btn text-xs sm:text-sm w-full py-2.5 sm:py-3 font-bold !border-rose-600 !text-rose-300 hover:!bg-rose-950/60"
+                      className="pixel-btn text-xs w-full py-1.5 sm:py-2 font-bold !border-rose-600 !text-rose-300 hover:!bg-rose-950/60"
                     >
                       🏃 撤退する (開始10秒以内・無料)
                     </button>
@@ -1280,7 +1281,7 @@ export default function App() {
                       showToast(`💸 大量のコイン 💰${escapeCost.toLocaleString()} G を投げ捨てて敵の目を眩まし、緊急撤退しました！`);
                     }}
                     disabled={!canAffordPaidEscape}
-                    className={`pixel-btn text-xs sm:text-sm w-full py-2.5 sm:py-3 font-bold flex items-center justify-center gap-1.5 transition-all ${
+                    className={`pixel-btn text-xs w-full py-1.5 sm:py-2 font-bold flex items-center justify-center gap-1 transition-all ${
                       canAffordPaidEscape
                         ? '!border-amber-500 !bg-amber-950/80 !text-amber-200 hover:!bg-amber-900 active:scale-95 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
                         : '!border-slate-800 !text-slate-500 bg-slate-900/90 opacity-60 cursor-not-allowed'
@@ -1290,12 +1291,12 @@ export default function App() {
                     {canAffordPaidEscape ? (
                       <>
                         <span>💸</span>
-                        <span>金の力で緊急撤退 (💰 {escapeCost.toLocaleString()} G 消費)</span>
+                        <span>金の力で緊急撤退 (💰 {escapeCost.toLocaleString()} G)</span>
                       </>
                     ) : (
                       <>
                         <span>🔒</span>
-                        <span>撤退不可（緊急脱出に 💰 {escapeCost.toLocaleString()} G 必要）</span>
+                        <span>撤退不可（💰 {escapeCost.toLocaleString()} G 必要）</span>
                       </>
                     )}
                   </button>
@@ -1303,16 +1304,16 @@ export default function App() {
               })()}
             </div>
           ) : (
-            <div className="flex gap-2 w-full">
+            <div className="flex gap-1.5 w-full">
               <button
                 onClick={handleStartFocus}
-                className="pixel-btn active text-xs sm:text-sm flex-1 py-2.5 font-bold"
+                className="pixel-btn active text-xs flex-1 py-1.5 sm:py-2 font-bold"
               >
                 ⚔️ 次の集中へ進む
               </button>
               <button
                 onClick={handleStop}
-                className="pixel-btn opacity-80 text-xs sm:text-sm px-4 py-2.5"
+                className="pixel-btn opacity-80 text-xs px-3 py-1.5 sm:py-2"
               >
                 終了する
               </button>
@@ -1320,13 +1321,14 @@ export default function App() {
           )}
         </div>
 
-        {/* Feature Row 1: Inventory & Specialization */}
-        <div className="grid grid-cols-2 gap-2 w-full">
+        {/* Compact 3-Column Navigation Grid (Cut vertical height in half) */}
+        <div className="grid grid-cols-3 gap-1.5 w-full">
+          {/* Row 1 */}
           <button
             onClick={() => setShowInventory(!showInventory)}
-            className="pixel-btn text-xs sm:text-sm py-2 sm:py-2.5 flex items-center justify-center gap-1.5"
+            className="pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate"
           >
-            <span>🎒</span> 装備と工房 {timerMode === 'focus' && '🔒'}
+            <span>🎒</span> <span className="truncate">装備・工房</span> {timerMode === 'focus' && '🔒'}
           </button>
 
           {(() => {
@@ -1338,22 +1340,28 @@ export default function App() {
                   setIsJobMilestoneTrigger(canChange);
                   setShowJobModal(true);
                 }}
-                className={`pixel-btn text-xs sm:text-sm py-2 sm:py-2.5 flex items-center justify-center gap-1.5 ${
+                className={`pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate ${
                   canChange
                     ? '!bg-amber-600 !border-amber-400 !text-white hover:!bg-amber-500 animate-pulse'
                     : '!bg-indigo-950/90 !border-indigo-500 !text-indigo-200 hover:!bg-indigo-900'
                 }`}
               >
-                <span>🏛️ 特化職</span>
-                {canChange && <span className="text-[9px] bg-amber-400 text-slate-950 font-bold px-1 rounded">転職可!</span>}
-                {!unlocked && <span className="text-[9px] bg-slate-900 text-slate-400 px-1 rounded border border-slate-700">Lv.100解禁</span>}
+                <span>🏛️</span> <span className="truncate">特化職</span>
+                {canChange && <span className="text-[8px] bg-amber-400 text-slate-950 font-bold px-0.5 rounded">転職!</span>}
+                {!unlocked && <span className="text-[8px] text-slate-400">Lv100</span>}
               </button>
             );
           })()}
-        </div>
 
-        {/* Feature Row 2: Guild & Auction */}
-        <div className="grid grid-cols-2 gap-2 w-full">
+          <button
+            onClick={() => setShowFlashcards(true)}
+            className="pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate"
+            title="単語帳・魔導書"
+          >
+            <span>📖</span> <span className="truncate">魔導書</span>
+          </button>
+
+          {/* Row 2 */}
           <button
             onClick={() => {
               if (!user) {
@@ -1362,12 +1370,12 @@ export default function App() {
                 setShowGuildRanking(true);
               }
             }}
-            className={`pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 flex items-center justify-center gap-1 ${
+            className={`pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate ${
               !user ? 'opacity-80 border-slate-700' : ''
             }`}
             title={!user ? 'ギルド（Googleログインが必要）' : 'ギルドランキング'}
           >
-            <span>🛡️</span> ギルド {!user && <span className="text-[10px]">🔒</span>}
+            <span>🛡️</span> <span className="truncate">ギルド</span> {!user && <span className="text-[9px]">🔒</span>}
           </button>
 
           <button
@@ -1378,33 +1386,22 @@ export default function App() {
                 setShowAuctionHouse(true);
               }
             }}
-            className={`pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 flex items-center justify-center gap-1 ${
+            className={`pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate ${
               !user ? 'opacity-80 border-slate-700' : ''
             }`}
             title={!user ? '取引所（Googleログインが必要）' : 'グローバルオークション'}
           >
-            <span>⚖️</span> 取引所 {!user && <span className="text-[10px]">🔒</span>}
-          </button>
-        </div>
-
-        {/* Feature Row 3: Flashcards & Settings */}
-        <div className="grid grid-cols-2 gap-2 w-full mt-2">
-          <button
-            onClick={() => setShowFlashcards(true)}
-            className="pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 flex items-center justify-center gap-1"
-            title="単語帳・魔導書"
-          >
-            <span>📖</span> 魔導書（単語帳）
+            <span>⚖️</span> <span className="truncate">取引所</span> {!user && <span className="text-[9px]">🔒</span>}
           </button>
 
           <button
             onClick={() => setShowSettings(!showSettings)}
-            className="pixel-btn text-xs sm:text-sm py-1.5 sm:py-2 relative flex items-center justify-center gap-1"
+            className="pixel-btn text-[10px] sm:text-xs py-1.5 px-1 relative flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate"
             title="設定・クラウド同期"
           >
-            <span>⚙️</span> 設定
+            <span>⚙️</span> <span className="truncate">設定</span>
             {user && (
-              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-sky-500 text-[8px] text-white shadow-sm border border-slate-900">
+              <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-sky-500 text-[7px] text-white shadow-sm border border-slate-900">
                 ☁
               </span>
             )}
@@ -1412,11 +1409,11 @@ export default function App() {
         </div>
 
         {/* Global Legal & Branding Footer for Google OAuth Verification */}
-        <footer className="mt-4 pt-2 text-center text-[10px] text-slate-500 space-y-1">
+        <footer className="mt-1 pt-1 text-center text-[9px] text-slate-500 space-y-0.5 w-full">
           <div className="font-bold text-slate-400">
             Focus-quest-study <span className="font-normal text-slate-500">(Focus Quest)</span>
           </div>
-          <div className="flex justify-center space-x-4 text-slate-400">
+          <div className="flex justify-center space-x-3 text-slate-400 text-[8px] sm:text-[9px]">
             <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-amber-400 underline">
               プライバシーポリシー (Privacy)
             </a>

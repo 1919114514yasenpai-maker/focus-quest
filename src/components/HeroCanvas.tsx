@@ -270,8 +270,13 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         focusAnimationsEnabled,
       } = propsRef.current;
 
-      const groundY = canvas.height - 70;
-      const heroX = 180;
+      const isMobile = canvas.width < 640;
+      // 下部操作パネル（タスク入力・開始ボタン・グリッド等）のすぐ上に自然に接地
+      const bottomControlsHeight = isMobile ? 215 : 205;
+      const groundY = Math.max(220, canvas.height - bottomControlsHeight);
+      const heroX = isMobile
+        ? Math.max(65, Math.min(120, Math.round(canvas.width * 0.24)))
+        : 170;
       const heroY = groundY;
 
       if (lastFocusingState !== isFocusing) {
@@ -404,11 +409,15 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         ctx.fillStyle = '#080c16';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Center Log Box Layout calculation
-        const boxWidth = Math.min(canvas.width - 24, 640);
-        const boxHeight = Math.min(canvas.height - 180, 240);
-        const boxX = Math.max(12, (canvas.width - boxWidth) / 2);
-        const boxY = Math.max(75, (canvas.height - boxHeight) / 2 - 10);
+        // Responsive Center Log Box Layout calculation within safe visual boundaries
+        const isMobile = canvas.width < 640;
+        const boxWidth = Math.min(canvas.width - 16, 620);
+        const topSafe = isMobile ? 135 : 140;
+        const bottomSafe = isMobile ? 220 : 210;
+        const safeAvailableHeight = Math.max(110, canvas.height - topSafe - bottomSafe);
+        const boxHeight = Math.min(safeAvailableHeight, isMobile ? 200 : 270);
+        const boxX = Math.max(8, (canvas.width - boxWidth) / 2);
+        const boxY = topSafe + Math.max(0, (safeAvailableHeight - boxHeight) / 2);
 
         // Draw outer retro panel
         ctx.fillStyle = '#0f172a';
@@ -438,7 +447,7 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         ctx.fillText(statusText, boxX + boxWidth - 10, boxY + 15);
 
         // Enemy summary bar inside header
-        let logsStartY = boxY + 38;
+        let logsStartY = boxY + 36;
         if (isRunning && currentMonster) {
           ctx.fillStyle = '#111827';
           ctx.fillRect(boxX + 6, boxY + 34, boxWidth - 12, 24);
@@ -471,10 +480,11 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
           logsStartY = boxY + 64;
         }
 
-        // Battle logs listing
-        const availableHeight = boxY + boxHeight - logsStartY - 6;
-        const lineHeight = 20;
-        const maxVisibleLogs = Math.max(1, Math.floor(availableHeight / lineHeight));
+        // Battle logs listing (reserve 22px at bottom for internal hint footer)
+        const footerHeight = 22;
+        const availableLogHeight = Math.max(20, boxHeight - (logsStartY - boxY) - footerHeight - 4);
+        const lineHeight = 19;
+        const maxVisibleLogs = Math.max(1, Math.floor(availableLogHeight / lineHeight));
         const visibleLogs = battleLogs.slice(-maxVisibleLogs);
 
         visibleLogs.forEach((log, index) => {
@@ -484,17 +494,17 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
           ctx.font = '10px monospace';
           // Timestamp
           ctx.fillStyle = '#64748b';
-          ctx.fillText(`[${log.time}]`, boxX + 10, itemY);
+          ctx.fillText(`[${log.time}]`, boxX + 8, itemY);
 
           // Tag
           ctx.font = 'bold 9px monospace';
           ctx.fillStyle = log.tagColor;
-          ctx.fillText(`[${log.tag}]`, boxX + 70, itemY);
+          ctx.fillText(`[${log.tag}]`, boxX + 66, itemY);
 
           // Log Text
           ctx.font = '11px "DotGothic16", monospace';
           ctx.fillStyle = log.color;
-          const maxTextW = boxWidth - 145;
+          const maxTextW = boxWidth - 140;
           let displayText = log.text;
           if (ctx.measureText(displayText).width > maxTextW) {
             while (displayText.length > 5 && ctx.measureText(displayText + '...').width > maxTextW) {
@@ -502,14 +512,23 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
             }
             displayText += '...';
           }
-          ctx.fillText(displayText, boxX + 125, itemY);
+          ctx.fillText(displayText, boxX + 118, itemY);
         });
 
-        // Bottom hint
+        // Bottom hint footer INSIDE the panel
+        ctx.fillStyle = '#0a0f1d';
+        ctx.fillRect(boxX + 1, boxY + boxHeight - footerHeight, boxWidth - 2, footerHeight - 1);
+        ctx.strokeStyle = '#1e293b';
+        ctx.beginPath();
+        ctx.moveTo(boxX + 1, boxY + boxHeight - footerHeight);
+        ctx.lineTo(boxX + boxWidth - 1, boxY + boxHeight - footerHeight);
+        ctx.stroke();
+
         ctx.font = '10px "DotGothic16", monospace';
         ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
         ctx.fillStyle = '#64748b';
-        ctx.fillText('💡 アニメーションは右下の「⚙️ 設定」からいつでも再開できます', canvas.width / 2, boxY + boxHeight + 18);
+        ctx.fillText('💡 アニメーションは右下の「⚙️ 設定」からいつでも再開できます', boxX + boxWidth / 2, boxY + boxHeight - footerHeight / 2);
 
         animationFrameId = requestAnimationFrame(draw);
         return;
@@ -534,15 +553,15 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       // Stars
       for (let i = 0; i < 20; i++) {
         const x = (i * 137 + elapsed * (isRunning ? 1.5 : 0.2)) % canvas.width;
-        const y = (i * 73) % (canvas.height - 80);
+        const y = (i * 73) % Math.max(40, groundY - 20);
         const starSize = (i % 3 === 0) ? 3 : 2;
         ctx.fillStyle = i % 2 === 0 ? '#38bdf8' : '#f59e0b';
         ctx.fillRect(Math.floor(x), Math.floor(y), starSize, starSize);
       }
 
-      // Ground
+      // Ground extends to bottom of screen
       ctx.fillStyle = '#0f172a';
-      ctx.fillRect(0, groundY, canvas.width, 70);
+      ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
 
       ctx.strokeStyle = '#334155';
       ctx.lineWidth = 2;
@@ -557,6 +576,13 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         ctx.fillRect(Math.floor(x), groundY + 4, 16, 4);
         ctx.fillRect(Math.floor(x + 16), groundY + 24, 16, 4);
       }
+
+      // Subtle ground depth gradient
+      const groundGrad = ctx.createLinearGradient(0, groundY, 0, canvas.height);
+      groundGrad.addColorStop(0, 'rgba(15, 23, 42, 0)');
+      groundGrad.addColorStop(1, 'rgba(8, 12, 22, 0.7)');
+      ctx.fillStyle = groundGrad;
+      ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
 
       // Animation calculation
       const walkCycle = isRunning ? Math.sin(elapsed * 0.25) : 0;
