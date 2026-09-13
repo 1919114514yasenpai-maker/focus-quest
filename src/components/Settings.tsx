@@ -26,6 +26,9 @@ interface SettingsProps {
   setFocusAnimationsEnabled: (v: boolean) => void;
   keepScreenAwake: boolean;
   setKeepScreenAwake: (v: boolean) => void;
+  onOpenSpotify?: () => void;
+  isSpotifyFloatingVisible?: boolean;
+  setIsSpotifyFloatingVisible?: (v: boolean) => void;
 }
 
 export const Settings: React.FC<SettingsProps> = ({
@@ -46,6 +49,9 @@ export const Settings: React.FC<SettingsProps> = ({
   setFocusAnimationsEnabled,
   keepScreenAwake,
   setKeepScreenAwake,
+  onOpenSpotify,
+  isSpotifyFloatingVisible = true,
+  setIsSpotifyFloatingVisible,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPasteModal, setShowPasteModal] = useState(false);
@@ -212,6 +218,42 @@ export const Settings: React.FC<SettingsProps> = ({
               }}
             />
           </label>
+
+          {/* Spotify BGM 設定 */}
+          <div className="pt-2 border-t border-slate-800/80 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                <span>🎵</span>
+                <span>Spotify BGM 音楽連携</span>
+              </div>
+              {onOpenSpotify && (
+                <button
+                  type="button"
+                  onClick={onOpenSpotify}
+                  className="pixel-btn text-[10px] !py-0.5 !px-2 !border-emerald-600 !text-emerald-300 hover:!bg-emerald-950 flex items-center gap-1"
+                >
+                  プレイヤーを開く ›
+                </button>
+              )}
+            </div>
+            {setIsSpotifyFloatingVisible && (
+              <label className="flex items-center justify-between cursor-pointer group">
+                <div className="flex flex-col">
+                  <span className="text-slate-200 group-hover:text-emerald-300">画面にBGMミニバーを表示する</span>
+                  <span className="text-[9px] text-slate-400">クエスト画面からワンタップで選曲やログインが可能</span>
+                </div>
+                <input 
+                  type="checkbox" 
+                  className="accent-emerald-500 w-4 h-4 cursor-pointer"
+                  checked={isSpotifyFloatingVisible}
+                  onChange={(e) => {
+                    setIsSpotifyFloatingVisible(e.target.checked);
+                    localStorage.setItem('focus_quest_spotify_float', e.target.checked.toString());
+                  }}
+                />
+              </label>
+            )}
+          </div>
         </div>
 
         {/* 読み込み確認モーダル */}
@@ -448,6 +490,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
             <div className="pt-2 border-t border-slate-800 text-center text-[10px] text-slate-500 space-y-1">
               <div className="font-bold text-slate-400">Focus-quest-study (Focus Quest)</div>
+              <div className="text-[9px] text-emerald-400/90 font-medium">Produced by waseapp</div>
               <div className="flex justify-center space-x-3 text-amber-400/80">
                 <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:underline hover:text-amber-300">
                   プライバシーポリシー

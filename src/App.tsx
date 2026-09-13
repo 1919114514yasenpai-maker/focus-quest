@@ -1,12 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { HeroCanvas } from './components/HeroCanvas';
-import { Inventory } from './components/Inventory';
-import { Settings } from './components/Settings';
-import { ChestModal } from './components/ChestModal';
-import { StageSelectModal } from './components/StageSelectModal';
-import { JobSelectModal } from './components/JobSelectModal';
-import { GuildRanking } from './components/GuildRanking';
-import { AuctionHouse } from './components/AuctionHouse';
 import { PlayerStats, EquipmentState, SaveData, Monster, PlayerItem, ChestReward, JobType } from './types';
 import { INITIAL_INVENTORY, ITEMS, getNextLevelXp, getMonsterForStage, generateUid, CRAFTING_RECIPES } from './gameData';
 import { getCompiledItem } from './itemUtils';
@@ -22,13 +15,28 @@ import {
   canChangeJobNow,
   getNextJobChangeLevel
 } from './jobUtils';
-import { useCloudSave } from './useCloudSave';
-import { db, auth } from './firebase';
-import { doc, getDoc, updateDoc, setDoc, increment } from 'firebase/firestore';
-import { CustomGem } from './components/CustomGem';
-import { FlashcardsModal } from './components/FlashcardsModal';
-
+import { useCloudSave, auth, updateWeeklyFocusTime } from './firebase';
 import { DailyShopItem } from './dailyShopUtils';
+
+// Code-split heavy modals and views for ultra-fast initial load
+const Inventory = React.lazy(() => import('./components/Inventory').then(m => ({ default: m.Inventory })));
+const Settings = React.lazy(() => import('./components/Settings').then(m => ({ default: m.Settings })));
+const ChestModal = React.lazy(() => import('./components/ChestModal').then(m => ({ default: m.ChestModal })));
+const StageSelectModal = React.lazy(() => import('./components/StageSelectModal').then(m => ({ default: m.StageSelectModal })));
+const JobSelectModal = React.lazy(() => import('./components/JobSelectModal').then(m => ({ default: m.JobSelectModal })));
+const GuildRanking = React.lazy(() => import('./components/GuildRanking').then(m => ({ default: m.GuildRanking })));
+const AuctionHouse = React.lazy(() => import('./components/AuctionHouse').then(m => ({ default: m.AuctionHouse })));
+const FlashcardsModal = React.lazy(() => import('./components/FlashcardsModal').then(m => ({ default: m.FlashcardsModal })));
+const CustomGem = React.lazy(() => import('./components/CustomGem').then(m => ({ default: m.CustomGem })));
+const SpotifyPlayerModal = React.lazy(() => import('./components/SpotifyPlayerModal').then(m => ({ default: m.SpotifyPlayerModal })));
+
+const ModalLoadingFallback = () => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in pointer-events-none">
+    <div className="pixel-panel px-4 py-2 bg-slate-900 border border-slate-700 text-[11px] text-amber-400 animate-pulse flex items-center gap-2 shadow-xl">
+      <span>⏳</span> 読み込み中...
+    </div>
+  </div>
+);
 
 export default function App() {
   const [focusMinutes, setFocusMinutes] = useState<number>(() => {
@@ -50,6 +58,16 @@ export default function App() {
   const [showGuildRanking, setShowGuildRanking] = useState(false);
   const [showAuctionHouse, setShowAuctionHouse] = useState(false);
   const [showFlashcards, setShowFlashcards] = useState(false);
+  const [showSpotifyModal, setShowSpotifyModal] = useState(false);
+  const [spotifyTrackTitle, setSpotifyTrackTitle] = useState<string>(() => {
+    return localStorage.getItem('focus_quest_spotify_title') || 'Lofi Beats';
+  });
+  const [spotifyEmbedUrl, setSpotifyEmbedUrl] = useState<string>(() => {
+    return localStorage.getItem('focus_quest_spotify_url') || 'https://open.spotify.com/embed/playlist/37i9dQZF1DXdLEN7aqioXM?utm_source=generator&theme=0';
+  });
+  const [isSpotifyFloatingVisible, setIsSpotifyFloatingVisible] = useState<boolean>(() => {
+    return localStorage.getItem('focus_quest_spotify_float') !== 'false';
+  });
   const [authPromptFeature, setAuthPromptFeature] = useState<'guild' | 'auction' | null>(null);
   const [myGuildName, setMyGuildName] = useState<string | undefined>();
   const [isJobMilestoneTrigger, setIsJobMilestoneTrigger] = useState(false);
@@ -62,9 +80,23 @@ export default function App() {
   const [pendingChestFocusMins, setPendingChestFocusMins] = useState<number | undefined>(undefined);
   const [deathNotice, setDeathNotice] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [sleepDefeatModal, setSleepDefeatModal] = useState<{ lostGold: number; lostItemsCount: number } | null>(null);
+
+  const sessionEarnedItemUids = useRef<string[]>([]);
+  const afkTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const sleepStartTimeRef = useRef<number | null>(null);
+  const targetEndTimeRef = useRef<number | null>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
+  };
+
+  const handleSelectSpotifyTrack = (title: string, embedUrl: string) => {
+    setSpotifyTrackTitle(title);
+    setSpotifyEmbedUrl(embedUrl);
+    localStorage.setItem('focus_quest_spotify_title', title);
+    localStorage.setItem('focus_quest_spotify_url', embedUrl);
+    showToast(`🎵 BGMを「${title}」に変更しました`);
   };
 
   useEffect(() => {
@@ -252,7 +284,7 @@ export default function App() {
         if (nextHp <= 0) {
           const prevStage = Math.max(1, prev.stage - 1);
           setCurrentMonster(getMonsterForStage(prevStage));
-          setDeathNotice(`💀 呪いのダメージで力尽きました！HPが全回復し、1階層前の Stage ${prevStage} に戻りました。`);
+          setDeathNotice(`💀 呪いで力尽きました！HPが全回復し、Stage ${prevStage} に戻りました。（※ペナルティなし・所持金やアイテムは減りません）`);
           return {
             ...prev,
             hp: prev.maxHp,
@@ -278,94 +310,7 @@ export default function App() {
     statWeaponItem?.effect?.curseHpDrain
   ]);
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-
-    if (timerMode !== 'idle' && !isAsleep) {
-      interval = setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            handleTimerComplete();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-
-    return () => clearInterval(interval);
-  }, [timerMode, isAsleep]);
-
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        setIsAsleep(true);
-      } else {
-        setIsAsleep(false);
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
-
-  const updateWeeklyFocusTime = async (minutes: number) => {
-    if (!auth.currentUser) return;
-    const currentWeekId = `2026-W${Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000))}`;
-    try {
-      const userRef = doc(db, "users", auth.currentUser.uid);
-      const userSnap = await getDoc(userRef);
-      if (userSnap.exists()) {
-        const data = userSnap.data();
-        if (data.weekId !== currentWeekId) {
-          await updateDoc(userRef, {
-            weekId: currentWeekId,
-            weeklyFocusTime: minutes,
-            totalFocusTime: increment(minutes)
-          });
-          if (data.guildId) {
-            const guildRef = doc(db, "guilds", data.guildId);
-            const guildSnap = await getDoc(guildRef);
-            if (guildSnap.exists()) {
-              if (guildSnap.data().weekId !== currentWeekId) {
-                await updateDoc(guildRef, { weekId: currentWeekId, weeklyFocusTime: minutes });
-              } else {
-                await updateDoc(guildRef, { weeklyFocusTime: increment(minutes) });
-              }
-            }
-          }
-        } else {
-          await updateDoc(userRef, { 
-            weeklyFocusTime: increment(minutes),
-            totalFocusTime: increment(minutes)
-          });
-          if (data.guildId) {
-            const guildRef = doc(db, "guilds", data.guildId);
-            const guildSnap = await getDoc(guildRef);
-            if (guildSnap.exists()) {
-              if (guildSnap.data().weekId !== currentWeekId) {
-                await updateDoc(guildRef, { weekId: currentWeekId, weeklyFocusTime: minutes });
-              } else {
-                await updateDoc(guildRef, { weeklyFocusTime: increment(minutes) });
-              }
-            }
-          }
-        }
-      } else {
-        await setDoc(userRef, {
-          displayName: auth.currentUser.displayName || "名無し勇者",
-          weeklyFocusTime: minutes,
-          totalFocusTime: minutes,
-          weekId: currentWeekId,
-          guildId: ""
-        });
-      }
-    } catch (e) {
-      console.error("Failed to update weekly focus time", e);
-    }
-  };
-
-  const handleTimerComplete = () => {
+  const handleTimerComplete = React.useCallback(() => {
     if (timerMode === 'focus') {
       const chestId = getChestForFocusMinutes(focusMinutes);
       const chestItem = ITEMS[chestId];
@@ -385,7 +330,9 @@ export default function App() {
 
       setStats(prev => ({ ...prev, hp: prev.maxHp }));
       setTimerMode('break');
-      setTimeLeft(breakMinutes * 60);
+      const breakSec = breakMinutes * 60;
+      setTimeLeft(breakSec);
+      targetEndTimeRef.current = Date.now() + breakSec * 1000;
 
       // 集中クエスト達成時は即座にクラウド自動バックアップ
       if (user) {
@@ -397,8 +344,146 @@ export default function App() {
       showToast('☕ 休憩時間が終了しました！次のクエストを開始しましょう。');
       setTimerMode('idle');
       setTimeLeft(focusMinutes * 60);
+      targetEndTimeRef.current = null;
     }
-  };
+  }, [timerMode, focusMinutes, breakMinutes, currentTaskText, user, saveToCloud]);
+
+  const triggerSleepAmbushDefeat = React.useCallback(() => {
+    if (afkTimeoutRef.current) {
+      clearTimeout(afkTimeoutRef.current);
+      afkTimeoutRef.current = null;
+    }
+    sleepStartTimeRef.current = null;
+    targetEndTimeRef.current = null;
+    setIsAsleep(false);
+
+    setStats(prev => {
+      const lostGold = Math.floor(prev.gold * 0.5);
+      const lostItemsCount = sessionEarnedItemUids.current.length;
+      setSleepDefeatModal({
+        lostGold,
+        lostItemsCount,
+      });
+      return {
+        ...prev,
+        hp: 0,
+        gold: Math.max(0, prev.gold - lostGold),
+      };
+    });
+
+    setInventory(prev => prev.filter(item => !sessionEarnedItemUids.current.includes(item.uid)));
+    sessionEarnedItemUids.current = [];
+    setTimerMode('idle');
+    setTimeLeft(focusMinutes * 60);
+  }, [focusMinutes]);
+
+  // タブ切り替え時の居眠り判定（10秒以内に復帰しないとモンスターに襲撃され全滅）
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (timerMode === 'focus') {
+          setIsAsleep(true);
+          sleepStartTimeRef.current = Date.now();
+          if (afkTimeoutRef.current) clearTimeout(afkTimeoutRef.current);
+          afkTimeoutRef.current = setTimeout(() => {
+            triggerSleepAmbushDefeat();
+          }, 10000);
+        }
+      } else {
+        if (timerMode === 'focus') {
+          if (sleepStartTimeRef.current) {
+            const elapsed = Date.now() - sleepStartTimeRef.current;
+            if (elapsed >= 10000) {
+              triggerSleepAmbushDefeat();
+              return;
+            }
+          }
+          setIsAsleep(false);
+          if (afkTimeoutRef.current) {
+            clearTimeout(afkTimeoutRef.current);
+            afkTimeoutRef.current = null;
+          }
+          sleepStartTimeRef.current = null;
+        } else {
+          setIsAsleep(false);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (afkTimeoutRef.current) {
+        clearTimeout(afkTimeoutRef.current);
+        afkTimeoutRef.current = null;
+      }
+    };
+  }, [timerMode, triggerSleepAmbushDefeat]);
+
+  // 実時間（時計・タイムスタンプ Date.now()）基準のタイマー制御
+  // 別タブで作業中やブラウザがバックグラウンド時でも正確に時計で時間をカウントし同期する
+  useEffect(() => {
+    if (timerMode === 'idle') {
+      targetEndTimeRef.current = null;
+      return;
+    }
+
+    // 目標終了時刻が未設定なら、現在時刻 + 残り秒数で初期化
+    if (!targetEndTimeRef.current) {
+      targetEndTimeRef.current = Date.now() + timeLeft * 1000;
+    }
+
+    const checkTimerTick = () => {
+      if (!targetEndTimeRef.current) return;
+      const now = Date.now();
+      const remainingMs = targetEndTimeRef.current - now;
+      const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+
+      if (remainingSec <= 0) {
+        targetEndTimeRef.current = null;
+        setTimeLeft(0);
+        handleTimerComplete();
+      } else {
+        setTimeLeft(remainingSec);
+      }
+    };
+
+    // タブ復帰時やウィンドウフォーカス復帰時に即座に時計と同期
+    const handleImmediateSync = () => {
+      checkTimerTick();
+    };
+
+    // 500ms周期でチェック（アクティブな時は滑らかに更新）
+    const interval = setInterval(checkTimerTick, 500);
+
+    document.addEventListener('visibilitychange', handleImmediateSync);
+    window.addEventListener('focus', handleImmediateSync);
+    window.addEventListener('pageshow', handleImmediateSync);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleImmediateSync);
+      window.removeEventListener('focus', handleImmediateSync);
+      window.removeEventListener('pageshow', handleImmediateSync);
+    };
+  }, [timerMode, handleTimerComplete]);
+
+  // ブラウザのタブ名に残り時間を表示（別タブで勉強や調べ物をしていても残り時間が一目でわかる）
+  useEffect(() => {
+    if (timerMode === 'focus') {
+      const mins = Math.floor(timeLeft / 60);
+      const secs = timeLeft % 60;
+      const formatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      document.title = `(${formatted}) 集中クエスト - Focus Quest`;
+    } else if (timerMode === 'break') {
+      const mins = Math.floor(timeLeft / 60);
+      const secs = timeLeft % 60;
+      const formatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      document.title = `(${formatted}) 休憩中 - Focus Quest`;
+    } else {
+      document.title = 'Focus Quest - 勉強・作業を冒険に変えるゲーミフィケーションポモドーロ';
+    }
+  }, [timerMode, timeLeft]);
 
   const handleClaimChestReward = (reward: ChestReward) => {
     addXpAndGold(reward.xp, reward.gold);
@@ -510,6 +595,7 @@ export default function App() {
             limitBreak: 0,
             addedPower: 0,
           };
+          sessionEarnedItemUids.current.push(newItem.uid);
           setInventory(prev => [...prev, newItem]);
         }
       });
@@ -533,7 +619,7 @@ export default function App() {
       if (nextHp <= 0) {
         const prevStage = Math.max(1, prev.stage - 1);
         setCurrentMonster(getMonsterForStage(prevStage));
-        setDeathNotice(`💀 敗北しました！HPが全回復し、1階層前の Stage ${prevStage} に戻り戦闘を続行します。`);
+        setDeathNotice(`💀 モンスターに敗北！HPが全回復し、Stage ${prevStage} に戻り戦闘を続行します。（※通常敗北のためゴールド・獲得アイテムは一切減りません）`);
         return {
           ...prev,
           hp: prev.maxHp,
@@ -1026,6 +1112,7 @@ export default function App() {
     localStorage.setItem('focus_quest_focus_mins', val.toString());
     if (timerMode === 'idle') {
       setTimeLeft(val * 60);
+      targetEndTimeRef.current = null;
     }
   };
 
@@ -1034,17 +1121,24 @@ export default function App() {
     setBreakMinutes(val);
     localStorage.setItem('focus_quest_break_mins', val.toString());
     if (timerMode === 'break') {
-      setTimeLeft(val * 60);
+      const breakSec = val * 60;
+      setTimeLeft(breakSec);
+      targetEndTimeRef.current = Date.now() + breakSec * 1000;
     }
   };
 
   const handleStartFocus = () => {
+    sessionEarnedItemUids.current = [];
+    setSleepDefeatModal(null);
     setTimerMode('focus');
-    setTimeLeft(focusMinutes * 60);
+    const totalSec = focusMinutes * 60;
+    setTimeLeft(totalSec);
+    targetEndTimeRef.current = Date.now() + totalSec * 1000;
     setStats(prev => ({ ...prev, hp: prev.maxHp }));
   };
 
   const handleStop = () => {
+    targetEndTimeRef.current = null;
     setTimerMode('idle');
     setTimeLeft(focusMinutes * 60);
   };
@@ -1059,23 +1153,39 @@ export default function App() {
   const xpPercent = Math.min(100, Math.max(0, (stats.xp / nextLevelXp) * 100));
   const hpPercent = Math.min(100, Math.max(0, (stats.hp / stats.maxHp) * 100));
 
-  const activeEffects: string[] = [];
-  const jobGoldBonus = getGoldBonusMultiplier(stats.job || 'balanced');
-  const jobXpBonus = getXpBonusMultiplier(stats.job || 'balanced');
-  const creditScore = stats.creditScore || 100;
-  const creditScoreBonus = creditScore >= 120 ? 0.1 : creditScore < 80 ? -0.1 : 0;
+  const { activeEffects, totalGoldBonus, totalXpBonus } = React.useMemo(() => {
+    const effects: string[] = [];
+    const jobGold = getGoldBonusMultiplier(stats.job || 'balanced');
+    const jobXp = getXpBonusMultiplier(stats.job || 'balanced');
+    const creditScore = stats.creditScore || 100;
+    const creditScoreBonus = creditScore >= 120 ? 0.1 : creditScore < 80 ? -0.1 : 0;
 
-  const totalGoldBonus = (statWeaponItem?.effect?.goldBonus || 0) + (statArmorItem?.effect?.goldBonus || 0) + jobGoldBonus + creditScoreBonus;
-  const totalXpBonus = (statWeaponItem?.effect?.xpBonus || 0) + (statArmorItem?.effect?.xpBonus || 0) + jobXpBonus + creditScoreBonus;
+    const goldBonus = (statWeaponItem?.effect?.goldBonus || 0) + (statArmorItem?.effect?.goldBonus || 0) + jobGold + creditScoreBonus;
+    const xpBonus = (statWeaponItem?.effect?.xpBonus || 0) + (statArmorItem?.effect?.xpBonus || 0) + jobXp + creditScoreBonus;
 
-  if (stats.hasCurseImmunity) activeEffects.push(`📜 呪い無効化 (次回の解呪まで)`);
-  if (statWeaponItem?.effect?.critChance) activeEffects.push(`会心率 +${Math.floor(statWeaponItem.effect.critChance * 100)}%`);
-  if (totalGoldBonus !== 0) activeEffects.push(`獲得G ${totalGoldBonus > 0 ? '+' : ''}${Math.round(totalGoldBonus * 100)}%`);
-  if (totalXpBonus !== 0) activeEffects.push(`獲得EXP ${totalXpBonus > 0 ? '+' : ''}${Math.round(totalXpBonus * 100)}%`);
-  if (statWeaponItem?.effect?.lifesteal) activeEffects.push(`攻撃吸血 +${Math.floor(statWeaponItem.effect.lifesteal * 100)}%`);
-  const currentHpRegen = statArmorItem?.effect?.hpRegen || 1;
-  activeEffects.push(`毎秒HP回復 +${currentHpRegen}`);
-  if (statArmorItem?.effect?.maxHpBonus) activeEffects.push(`最大HP +${statArmorItem.effect.maxHpBonus}`);
+    if (stats.hasCurseImmunity) effects.push(`📜 呪い無効化 (次回の解呪まで)`);
+    if (statWeaponItem?.effect?.critChance) effects.push(`会心率 +${Math.floor(statWeaponItem.effect.critChance * 100)}%`);
+    if (goldBonus !== 0) effects.push(`獲得G ${goldBonus > 0 ? '+' : ''}${Math.round(goldBonus * 100)}%`);
+    if (xpBonus !== 0) effects.push(`獲得EXP ${xpBonus > 0 ? '+' : ''}${Math.round(xpBonus * 100)}%`);
+    if (statWeaponItem?.effect?.lifesteal) effects.push(`攻撃吸血 +${Math.floor(statWeaponItem.effect.lifesteal * 100)}%`);
+    const currentHpRegen = statArmorItem?.effect?.hpRegen || 1;
+    effects.push(`毎秒HP回復 +${currentHpRegen}`);
+    if (statArmorItem?.effect?.maxHpBonus) effects.push(`最大HP +${statArmorItem.effect.maxHpBonus}`);
+
+    return { activeEffects: effects, totalGoldBonus: goldBonus, totalXpBonus: xpBonus };
+  }, [
+    stats.job,
+    stats.creditScore,
+    stats.hasCurseImmunity,
+    statWeaponItem?.effect?.goldBonus,
+    statArmorItem?.effect?.goldBonus,
+    statWeaponItem?.effect?.xpBonus,
+    statArmorItem?.effect?.xpBonus,
+    statWeaponItem?.effect?.critChance,
+    statWeaponItem?.effect?.lifesteal,
+    statArmorItem?.effect?.hpRegen,
+    statArmorItem?.effect?.maxHpBonus,
+  ]);
 
   const currentJobDef = JOBS[stats.job || 'balanced'];
 
@@ -1321,91 +1431,129 @@ export default function App() {
           )}
         </div>
 
-        {/* Compact 3-Column Navigation Grid (Cut vertical height in half) */}
-        <div className="grid grid-cols-3 gap-1.5 w-full">
-          {/* Row 1 */}
-          <button
-            onClick={() => setShowInventory(!showInventory)}
-            className="pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate"
-          >
-            <span>🎒</span> <span className="truncate">装備・工房</span> {timerMode === 'focus' && '🔒'}
-          </button>
-
-          {(() => {
-            const unlocked = isJobUnlocked(stats.level);
-            const canChange = canChangeJobNow(stats.level, stats.lastJobChangeLevel);
-            return (
-              <button
-                onClick={() => {
-                  setIsJobMilestoneTrigger(canChange);
-                  setShowJobModal(true);
-                }}
-                className={`pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate ${
-                  canChange
-                    ? '!bg-amber-600 !border-amber-400 !text-white hover:!bg-amber-500 animate-pulse'
-                    : '!bg-indigo-950/90 !border-indigo-500 !text-indigo-200 hover:!bg-indigo-900'
-                }`}
-              >
-                <span>🏛️</span> <span className="truncate">特化職</span>
-                {canChange && <span className="text-[8px] bg-amber-400 text-slate-950 font-bold px-0.5 rounded">転職!</span>}
-                {!unlocked && <span className="text-[8px] text-slate-400">Lv100</span>}
-              </button>
-            );
-          })()}
-
-          <button
-            onClick={() => setShowFlashcards(true)}
-            className="pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate"
-            title="単語帳・魔導書"
-          >
-            <span>📖</span> <span className="truncate">魔導書</span>
-          </button>
-
-          {/* Row 2 */}
-          <button
-            onClick={() => {
-              if (!user) {
-                setAuthPromptFeature('guild');
-              } else {
-                setShowGuildRanking(true);
-              }
-            }}
-            className={`pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate ${
-              !user ? 'opacity-80 border-slate-700' : ''
-            }`}
-            title={!user ? 'ギルド（Googleログインが必要）' : 'ギルドランキング'}
-          >
-            <span>🛡️</span> <span className="truncate">ギルド</span> {!user && <span className="text-[9px]">🔒</span>}
-          </button>
-
-          <button
-            onClick={() => {
-              if (!user) {
-                setAuthPromptFeature('auction');
-              } else {
-                setShowAuctionHouse(true);
-              }
-            }}
-            className={`pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate ${
-              !user ? 'opacity-80 border-slate-700' : ''
-            }`}
-            title={!user ? '取引所（Googleログインが必要）' : 'グローバルオークション'}
-          >
-            <span>⚖️</span> <span className="truncate">取引所</span> {!user && <span className="text-[9px]">🔒</span>}
-          </button>
-
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className="pixel-btn text-[10px] sm:text-xs py-1.5 px-1 relative flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate"
-            title="設定・クラウド同期"
-          >
-            <span>⚙️</span> <span className="truncate">設定</span>
-            {user && (
-              <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-sky-500 text-[7px] text-white shadow-sm border border-slate-900">
-                ☁
+        {/* Spotify BGM Mini Bar */}
+        {isSpotifyFloatingVisible && (
+          <div className="w-full flex items-center justify-between px-2.5 py-1 bg-slate-900/90 border border-emerald-500/50 rounded-lg shadow-sm">
+            <div 
+              onClick={() => setShowSpotifyModal(true)}
+              className="flex items-center gap-1.5 min-w-0 flex-1 cursor-pointer hover:opacity-85 transition-opacity"
+              title="Spotify BGMプレイヤーを開く"
+            >
+              <span className="text-emerald-400 text-xs animate-pulse">🎵</span>
+              <span className="text-[10px] sm:text-xs text-emerald-300 font-bold truncate">
+                {spotifyTrackTitle}
               </span>
-            )}
-          </button>
+              <span className="text-[8px] sm:text-[9px] text-emerald-400 bg-emerald-950/90 px-1 py-0.2 rounded border border-emerald-800/80 hidden xs:inline">
+                Spotify
+              </span>
+            </div>
+            <button
+              onClick={() => setShowSpotifyModal(true)}
+              className="pixel-btn text-[9px] sm:text-[10px] !py-0.5 !px-2 !border-emerald-600 !text-emerald-300 hover:!bg-emerald-950 flex items-center gap-1 flex-shrink-0"
+              title="選曲・Spotifyアカウントでログイン"
+            >
+              <span>🎧 選曲/ログイン</span>
+            </button>
+          </div>
+        )}
+
+        {/* Navigation Grid */}
+        <div className="flex flex-col gap-1.5 w-full">
+          {/* Row 1: 3-Columns */}
+          <div className="grid grid-cols-3 gap-1.5 w-full">
+            <button
+              onClick={() => setShowInventory(!showInventory)}
+              className="pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate"
+            >
+              <span>🎒</span> <span className="truncate">装備・工房</span> {timerMode === 'focus' && '🔒'}
+            </button>
+
+            {(() => {
+              const unlocked = isJobUnlocked(stats.level);
+              const canChange = canChangeJobNow(stats.level, stats.lastJobChangeLevel);
+              return (
+                <button
+                  onClick={() => {
+                    setIsJobMilestoneTrigger(canChange);
+                    setShowJobModal(true);
+                  }}
+                  className={`pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate ${
+                    canChange
+                      ? '!bg-amber-600 !border-amber-400 !text-white hover:!bg-amber-500 animate-pulse'
+                      : '!bg-indigo-950/90 !border-indigo-500 !text-indigo-200 hover:!bg-indigo-900'
+                  }`}
+                >
+                  <span>🏛️</span> <span className="truncate">特化職</span>
+                  {canChange && <span className="text-[8px] bg-amber-400 text-slate-950 font-bold px-0.5 rounded">転職!</span>}
+                  {!unlocked && <span className="text-[8px] text-slate-400">Lv100</span>}
+                </button>
+              );
+            })()}
+
+            <button
+              onClick={() => setShowFlashcards(true)}
+              className="pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate"
+              title="単語帳・魔導書"
+            >
+              <span>📖</span> <span className="truncate">魔導書</span>
+            </button>
+          </div>
+
+          {/* Row 2: 4-Columns (Guild, Auction, Spotify Music, Settings) */}
+          <div className="grid grid-cols-4 gap-1.5 w-full">
+            <button
+              onClick={() => {
+                if (!user) {
+                  setAuthPromptFeature('guild');
+                } else {
+                  setShowGuildRanking(true);
+                }
+              }}
+              className={`pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate ${
+                !user ? 'opacity-80 border-slate-700' : ''
+              }`}
+              title={!user ? 'ギルド（Googleログインが必要）' : 'ギルドランキング'}
+            >
+              <span>🛡️</span> <span className="truncate">ギルド</span> {!user && <span className="text-[9px]">🔒</span>}
+            </button>
+
+            <button
+              onClick={() => {
+                if (!user) {
+                  setAuthPromptFeature('auction');
+                } else {
+                  setShowAuctionHouse(true);
+                }
+              }}
+              className={`pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate ${
+                !user ? 'opacity-80 border-slate-700' : ''
+              }`}
+              title={!user ? '取引所（Googleログインが必要）' : 'グローバルオークション'}
+            >
+              <span>⚖️</span> <span className="truncate">取引所</span> {!user && <span className="text-[9px]">🔒</span>}
+            </button>
+
+            <button
+              onClick={() => setShowSpotifyModal(true)}
+              className="pixel-btn text-[10px] sm:text-xs py-1.5 px-1 flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate !border-emerald-600/80 !text-emerald-300 hover:!bg-emerald-950/80"
+              title="Spotify BGMプレイヤー（アカウントログイン対応）"
+            >
+              <span>🎵</span> <span className="truncate">音楽</span>
+            </button>
+
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="pixel-btn text-[10px] sm:text-xs py-1.5 px-1 relative flex items-center justify-center gap-1 min-h-[32px] sm:min-h-[36px] truncate"
+              title="設定・クラウド同期"
+            >
+              <span>⚙️</span> <span className="truncate">設定</span>
+              {user && (
+                <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-sky-500 text-[7px] text-white shadow-sm border border-slate-900">
+                  ☁
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Global Legal & Branding Footer for Google OAuth Verification */}
@@ -1413,6 +1561,7 @@ export default function App() {
           <div className="font-bold text-slate-400">
             Focus-quest-study <span className="font-normal text-slate-500">(Focus Quest)</span>
           </div>
+          <div className="text-[8px] text-emerald-400/90 font-medium">Produced by waseapp</div>
           <div className="flex justify-center space-x-3 text-slate-400 text-[8px] sm:text-[9px]">
             <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-amber-400 underline">
               プライバシーポリシー (Privacy)
@@ -1425,7 +1574,8 @@ export default function App() {
         </footer>
       </div>
 
-      {showJobModal && (
+      <Suspense fallback={<ModalLoadingFallback />}>
+        {showJobModal && (
         <JobSelectModal
           currentJob={stats.job || 'balanced'}
           level={stats.level}
@@ -1582,7 +1732,21 @@ export default function App() {
           setFocusAnimationsEnabled={setFocusAnimationsEnabled}
           keepScreenAwake={keepScreenAwake}
           setKeepScreenAwake={setKeepScreenAwake}
+          onOpenSpotify={() => setShowSpotifyModal(true)}
+          isSpotifyFloatingVisible={isSpotifyFloatingVisible}
+          setIsSpotifyFloatingVisible={setIsSpotifyFloatingVisible}
         />
+      )}
+
+      {showSpotifyModal && (
+        <React.Suspense fallback={<ModalLoadingFallback />}>
+          <SpotifyPlayerModal
+            onClose={() => setShowSpotifyModal(false)}
+            currentTrackTitle={spotifyTrackTitle}
+            currentEmbedUrl={spotifyEmbedUrl}
+            onSelectTrack={handleSelectSpotifyTrack}
+          />
+        </React.Suspense>
       )}
 
       {showStageSelect && (
@@ -1594,36 +1758,91 @@ export default function App() {
         />
       )}
 
-      {isAsleep && timerMode === 'focus' && (
-        <div className="absolute inset-0 z-30 bg-black/75 flex items-center justify-center pointer-events-none p-4">
-          <div className="pixel-panel border-rose-500 bg-slate-900/95 max-w-md text-center p-6 space-y-3">
-            <div className="text-3xl">💤</div>
-            <h2 className="text-rose-400 text-lg font-bold">勇者が居眠りをはじめました！</h2>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              タブを離れたため冒険が中断されています。<br />
-              この画面に戻ると戦闘が再開します。
+      {isAsleep && timerMode === 'focus' && !sleepDefeatModal && (
+        <div className="absolute inset-0 z-30 bg-black/80 flex items-center justify-center pointer-events-none p-4 animate-fade-in">
+          <div className="pixel-panel border-2 border-rose-500 bg-slate-900/95 max-w-md w-full text-center p-6 space-y-3 shadow-[0_0_25px_rgba(244,63,94,0.4)]">
+            <div className="text-4xl animate-bounce">💤</div>
+            <div className="space-y-1">
+              <span className="text-[10px] bg-rose-950 text-rose-300 border border-rose-700 font-bold px-2 py-0.5 rounded">
+                無防備状態
+              </span>
+              <h2 className="text-rose-400 text-lg font-bold">勇者が居眠りをはじめました！</h2>
+            </div>
+            <p className="text-xs text-rose-200 leading-relaxed font-bold">
+              画面を離れたため、勇者がその場で眠り込んでしまいました！
             </p>
+            <div className="bg-slate-950/80 border border-slate-800 rounded p-3 text-xs text-slate-300 space-y-1 text-left">
+              <p className="text-amber-300 font-bold flex items-center gap-1">
+                <span>⚠️</span> 10秒以内に起きないとモンスターに襲われます！
+              </p>
+              <p className="text-[11px] text-slate-400">
+                倒されると、<span className="text-rose-400 font-bold">所持金が半分</span>になり、<span className="text-rose-400 font-bold">今回手に入れたアイテムも全て奪われて</span>冒険が強制終了します。
+              </p>
+            </div>
+            <div className="text-xs font-bold text-rose-300 animate-pulse">
+              ⚔️ 早くタブに戻って目を覚まそう！
+            </div>
           </div>
         </div>
       )}
 
-      {stats.hp <= 0 && (
+      {sleepDefeatModal && (
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in pointer-events-auto">
+          <div className="pixel-panel border-2 border-rose-600 bg-slate-950 max-w-md w-full text-center p-6 space-y-4 shadow-[0_0_30px_rgba(244,63,94,0.5)]">
+            <div className="text-5xl animate-bounce">💤💥💀</div>
+            <div className="space-y-1">
+              <span className="text-[10px] px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-700 font-bold">
+                居眠り全滅ペナルティ
+              </span>
+              <h2 className="text-rose-400 text-lg font-bold">居眠り中にモンスターに倒された！</h2>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              集中クエスト中に居眠りをして無防備になった勇者は、忍び寄ったモンスターの群れに急襲され、為す術もなく倒されてしまいました…！
+            </p>
+            <div className="bg-slate-900/90 border border-rose-900/60 rounded p-3 text-xs space-y-2 text-left">
+              <div className="text-rose-400 font-bold flex items-center justify-between">
+                <span>💸 所持金半減ペナルティ:</span>
+                <span className="text-amber-300 font-mono">-{sleepDefeatModal.lostGold.toLocaleString()} G</span>
+              </div>
+              <div className="text-rose-400 font-bold flex items-center justify-between">
+                <span>🎒 戦利品の強奪:</span>
+                <span className="text-rose-200">今回獲得した装備 {sleepDefeatModal.lostItemsCount}個 を全没収</span>
+              </div>
+              <div className="text-rose-400 font-bold flex items-center justify-between">
+                <span>❌ 冒険強制失敗:</span>
+                <span className="text-slate-400">集中時間は無効（報酬なし）</span>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setStats(prev => ({ ...prev, hp: prev.maxHp }));
+                setSleepDefeatModal(null);
+              }}
+              className="pixel-btn active text-xs sm:text-sm px-6 py-2.5 w-full font-bold shadow-lg flex items-center justify-center gap-1.5"
+            >
+              <span>🏥</span> 教会で息を吹き返す（HP全回復）
+            </button>
+          </div>
+        </div>
+      )}
+
+      {stats.hp <= 0 && !sleepDefeatModal && (
         <div className="absolute inset-0 z-40 bg-black/90 flex items-center justify-center p-4">
           <div className="pixel-panel border-rose-600 bg-slate-950 max-w-md text-center p-8 space-y-4">
             <div className="text-4xl">💀</div>
             <h2 className="text-rose-500 text-xl font-bold">勇者は力尽きてしまった...</h2>
             <p className="text-xs text-slate-300 leading-relaxed">
-              モンスターの攻撃で倒れました。<br />
-              教会で息を吹き返します！
+              モンスターとの戦闘でHPが0になりました。<br />
+              <span className="text-emerald-400 font-bold">（※通常の戦闘不能のため、所持金やアイテムは減りません）</span><br />
+              教会で息を吹き返して冒険を続行します！
             </p>
             <button
               onClick={() => {
                 setStats(prev => ({ ...prev, hp: prev.maxHp }));
-                setTimerMode('idle');
               }}
               className="pixel-btn active text-sm px-6 py-2 w-full"
             >
-              復活する（HP全回復）
+              復活する（HP全回復・ペナルティなし）
             </button>
           </div>
         </div>
@@ -1637,6 +1856,7 @@ export default function App() {
       )}
 
       <CustomGem />
+      </Suspense>
     </div>
   );
 }

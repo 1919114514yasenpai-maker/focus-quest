@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { EquipmentState, GameItem, PlayerItem, ItemEffect, JobType, CraftingRecipe } from '../types';
 import { ITEMS, isCraftExclusiveItem, CRAFTING_RECIPES } from '../gameData';
-import { WEAPON_SPRITES, ARMOR_SPRITES, drawIconSprite } from '../sprites';
+import { WEAPON_SPRITES, ARMOR_SPRITES, drawIconSprite } from '../arts';
 import { 
   getCompiledItem, 
   calculateSellPrice, 

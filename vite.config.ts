@@ -21,14 +21,20 @@ export default defineConfig(() => {
         output: {
           manualChunks(id) {
             if (id.includes('node_modules')) {
-              if (id.includes('firebase')) return 'vendor-firebase';
+              if (id.includes('/firebase/') || id.includes('@firebase')) return 'vendor-firebase';
               if (id.includes('lucide-react')) return 'vendor-icons';
-              if (id.includes('react')) return 'vendor-react';
-              return 'vendor-libs';
+              if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) return 'vendor-react';
+              if (id.includes('motion')) return 'vendor-motion';
+              if (id.includes('pako') || id.includes('lz-string')) return 'vendor-compression';
+              return 'vendor-utils';
             }
           },
         },
       },
+    },
+    esbuild: {
+      legalComments: 'none',
+      drop: process.env.NODE_ENV === 'production' ? ['debugger'] : [],
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

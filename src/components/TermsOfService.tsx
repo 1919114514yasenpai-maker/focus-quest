@@ -7,13 +7,14 @@ export const TermsOfService: React.FC = () => {
         <div className="border-b border-slate-800 pb-4">
           <h1 className="text-2xl sm:text-3xl font-bold text-amber-400">利用規約 (Terms of Service)</h1>
           <p className="text-xs text-slate-400 mt-1">アプリケーション名: Focus-quest-study (Focus Quest)</p>
+          <p className="text-xs text-emerald-400 font-bold mt-0.5">※ このゲームはwaseappによって制作されました。</p>
           <p className="text-xs text-slate-400">制定日: 2026年9月7日</p>
         </div>
 
         <section className="space-y-2">
-          <h2 className="text-lg font-bold text-amber-300">1. 本規約の適用</h2>
+          <h2 className="text-lg font-bold text-amber-300">1. 本規約の適用および制作・権利</h2>
           <p className="text-sm text-slate-300 leading-relaxed">
-            本利用規約（以下「本規約」）は、Focus-quest-study（以下「当アプリ」）の利用に関する条件を、利用者と当アプリ開発者との間で定めるものです。利用者は、当アプリを利用することにより、本規約に同意したものとみなされます。
+            本利用規約（以下「本規約」）は、Focus-quest-study（以下「当アプリ」「本ゲーム」）の利用に関する条件を、利用者と当アプリ開発者との間で定めるものです。本ゲームはwaseappによって制作されました。利用者は、当アプリを利用することにより、本規約に同意したものとみなされます。
           </p>
         </section>
 

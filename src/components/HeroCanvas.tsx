@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useMemo } from 'react';
 import { Monster, PlayerItem, JobType } from '../types';
-import { WEAPON_SPRITES, ARMOR_SPRITES, drawIconSprite } from '../sprites';
+import { WEAPON_SPRITES, ARMOR_SPRITES, drawIconSprite } from '../arts';
 import { getCompiledItem } from '../itemUtils';
 import { getDamageMultiplierBonus, getCritChanceBonus, getGoldBonusMultiplier, getXpBonusMultiplier } from '../jobUtils';
 
@@ -201,6 +201,13 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       });
     };
 
+    let lastFrameTime = 0;
+    const FRAME_INTERVAL = 32; // 約31fpsに固定（レトロピクセルに最適＆CPU/GPU・バッテリー消費を大幅カット）
+
+    let cachedBgGrad: CanvasGradient | null = null;
+    let cachedGroundGrad: CanvasGradient | null = null;
+    let cachedGroundY = 0;
+
     // Responsive canvas dimension sync
     const updateCanvasDimensions = () => {
       const rect = canvas.getBoundingClientRect();
@@ -211,6 +218,22 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
           canvas.width = dWidth;
           canvas.height = dHeight;
           ctx.imageSmoothingEnabled = false;
+
+          // キャッシュグラデーションをリフレッシュ
+          const grad = ctx.createLinearGradient(0, 0, 0, dHeight);
+          grad.addColorStop(0, '#090d16');
+          grad.addColorStop(0.7, '#111827');
+          grad.addColorStop(1, '#1f2937');
+          cachedBgGrad = grad;
+
+          const isMobile = dWidth < 640;
+          const bottomControlsHeight = isMobile ? 215 : 205;
+          cachedGroundY = Math.max(220, dHeight - bottomControlsHeight);
+
+          const groundGrad = ctx.createLinearGradient(0, cachedGroundY, 0, dHeight);
+          groundGrad.addColorStop(0, 'rgba(15, 23, 42, 0)');
+          groundGrad.addColorStop(1, 'rgba(8, 12, 22, 0.7)');
+          cachedGroundGrad = groundGrad;
         }
       }
     };
@@ -257,7 +280,20 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       });
     };
 
-    const draw = () => {
+    const draw = (now: number) => {
+      // タブ非表示時は描画処理を完全にスキップして負荷を最小化
+      if (document.hidden) {
+        animationFrameId = requestAnimationFrame(draw);
+        return;
+      }
+
+      // フレームレートを約31fpsにスロットリング（CPU/GPU負荷を大幅軽減）
+      if (now - lastFrameTime < FRAME_INTERVAL) {
+        animationFrameId = requestAnimationFrame(draw);
+        return;
+      }
+      lastFrameTime = now;
+
       elapsed += 1;
       const {
         isFocusing,
@@ -291,9 +327,9 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       if (lastAsleepState !== isAsleep) {
         lastAsleepState = isAsleep;
         if (isAsleep && isFocusing) {
-          addBattleLog('💤 勇者が居眠りを始めました（画面に戻ると再開）', '#f43f5e', 'SLEEP', '#e11d48');
+          addBattleLog('💤 勇者が居眠りを始めました！10秒以内に起きないとモンスターに襲われます！', '#f43f5e', 'SLEEP', '#e11d48');
         } else if (!isAsleep && isFocusing) {
-          addBattleLog('✨ 勇者が目を覚まし、戦闘を再開しました！', '#34d399', 'WAKE', '#059669');
+          addBattleLog('✨ 勇者が目を覚まし、モンスターの奇襲を回避しました！', '#34d399', 'WAKE', '#059669');
         }
       }
 
@@ -543,11 +579,11 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       }
 
       // Background
-      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      grad.addColorStop(0, '#090d16');
-      grad.addColorStop(0.7, '#111827');
-      grad.addColorStop(1, '#1f2937');
-      ctx.fillStyle = grad;
+      if (cachedBgGrad) {
+        ctx.fillStyle = cachedBgGrad;
+      } else {
+        ctx.fillStyle = '#111827';
+      }
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // Stars
@@ -577,12 +613,11 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         ctx.fillRect(Math.floor(x + 16), groundY + 24, 16, 4);
       }
 
-      // Subtle ground depth gradient
-      const groundGrad = ctx.createLinearGradient(0, groundY, 0, canvas.height);
-      groundGrad.addColorStop(0, 'rgba(15, 23, 42, 0)');
-      groundGrad.addColorStop(1, 'rgba(8, 12, 22, 0.7)');
-      ctx.fillStyle = groundGrad;
-      ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+      // Ground depth gradient (cached)
+      if (cachedGroundGrad) {
+        ctx.fillStyle = cachedGroundGrad;
+        ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+      }
 
       // Animation calculation
       const walkCycle = isRunning ? Math.sin(elapsed * 0.25) : 0;
@@ -694,7 +729,7 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       animationFrameId = requestAnimationFrame(draw);
     };
 
-    draw();
+    animationFrameId = requestAnimationFrame(draw);
     return () => {
       cancelAnimationFrame(animationFrameId);
       resizeObserver.disconnect();
@@ -705,7 +740,11 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
     <canvas
       ref={canvasRef}
       className="w-full h-full block rounded-lg pixel-panel"
-      style={{ imageRendering: 'pixelated' }}
+      style={{
+        imageRendering: 'pixelated',
+        contain: 'paint layout',
+        willChange: 'transform',
+      }}
     />
   );
 };
