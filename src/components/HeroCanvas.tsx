@@ -201,9 +201,6 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
       });
     };
 
-    let lastFrameTime = 0;
-    const FRAME_INTERVAL = 32; // 約31fpsに固定（レトロピクセルに最適＆CPU/GPU・バッテリー消費を大幅カット）
-
     let cachedBgGrad: CanvasGradient | null = null;
     let cachedGroundGrad: CanvasGradient | null = null;
     let cachedGroundY = 0;
@@ -286,13 +283,6 @@ export const HeroCanvasComponent: React.FC<HeroCanvasProps> = ({
         animationFrameId = requestAnimationFrame(draw);
         return;
       }
-
-      // フレームレートを約31fpsにスロットリング（CPU/GPU負荷を大幅軽減）
-      if (now - lastFrameTime < FRAME_INTERVAL) {
-        animationFrameId = requestAnimationFrame(draw);
-        return;
-      }
-      lastFrameTime = now;
 
       elapsed += 1;
       const {

@@ -187,11 +187,34 @@ export default function App() {
     latestSaveDataRef.current = { stats, equipment, inventory };
   }, [stats, equipment, inventory]);
 
-  // ローカル保存は状態変化ごとに即時実行（データ消失防止）
+  // ローカル保存はデバウンス処理を実行（戦闘中の毎フレームJSON.stringifyによるスローダウン・処理落ちを完全に防ぎ高速化）
   useEffect(() => {
-    const data: SaveData = { stats, equipment, inventory };
-    localStorage.setItem(CURRENT_SAVE_KEY, JSON.stringify(data));
+    const timer = setTimeout(() => {
+      const data: SaveData = { stats, equipment, inventory };
+      try {
+        localStorage.setItem(CURRENT_SAVE_KEY, JSON.stringify(data));
+      } catch (e) {}
+    }, 800);
+
+    return () => clearTimeout(timer);
   }, [stats, equipment, inventory]);
+
+  // ページ離脱・タブ切替・ブラウザ閉じる時に確実に最新ローカルセーブを実行
+  useEffect(() => {
+    const flushSave = () => {
+      if (latestSaveDataRef.current) {
+        try {
+          localStorage.setItem(CURRENT_SAVE_KEY, JSON.stringify(latestSaveDataRef.current));
+        } catch (e) {}
+      }
+    };
+    window.addEventListener('beforeunload', flushSave);
+    window.addEventListener('pagehide', flushSave);
+    return () => {
+      window.removeEventListener('beforeunload', flushSave);
+      window.removeEventListener('pagehide', flushSave);
+    };
+  }, []);
 
   // クラウド同期はチカチカ防止のため「5分おき」に定期実行
   useEffect(() => {
@@ -1276,6 +1299,28 @@ export default function App() {
 
           <div className="flex justify-between items-center text-[10px] sm:text-xs text-amber-200 pt-0.5 border-t border-slate-800">
             <span className="truncate">🪙 所持金: {stats.gold.toLocaleString()} G</span>
+            {user ? (
+              <div 
+                onClick={() => setShowSettings(true)}
+                className="flex items-center gap-1 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/70 px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] cursor-pointer"
+                title="Googleログイン中（設定で管理）"
+              >
+                <span className="text-amber-300 font-bold truncate max-w-[80px] sm:max-w-[120px]">
+                  👤 {user.displayName || user.email?.split('@')[0]}
+                </span>
+                <span className="text-emerald-400 font-bold text-[8px] sm:text-[9px]">☁️</span>
+              </div>
+            ) : (
+              <button
+                onClick={handleLogin}
+                disabled={isLoggingIn}
+                className="pixel-btn active text-[9px] sm:text-[10px] !py-0.5 !px-1.5 !bg-indigo-900 hover:!bg-indigo-800 !border-indigo-400 text-indigo-100 flex items-center gap-1 font-bold animate-pulse"
+                title="Googleアカウントでログインしてクラウド保存・ギルド・取引所を解放"
+              >
+                <span>🌐</span>
+                <span>{isLoggingIn ? '認証中...' : 'ログイン'}</span>
+              </button>
+            )}
           </div>
 
           {activeEffects.length > 0 && (

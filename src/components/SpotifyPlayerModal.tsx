@@ -1,13 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 
 export interface BgmPreset {
   id: string;
   name: string;
-  category: 'lofi' | 'rpg' | 'ambient' | 'piano' | 'chill';
+  category: 'lofi' | 'rpg' | 'ambient' | 'piano' | 'chill' | 'jpop' | 'anime';
   icon: string;
   description: string;
   spotifyId: string;
   type: 'playlist' | 'album' | 'track';
+}
+
+export interface CustomTrack {
+  id: string;
+  title: string;
+  embedUrl: string;
+  webUrl: string;
+  addedAt: number;
 }
 
 export const BGM_PRESETS: BgmPreset[] = [
@@ -27,6 +35,24 @@ export const BGM_PRESETS: BgmPreset[] = [
     icon: '⚔️',
     description: 'ファンタジーRPGの世界に没入する酒場・冒険BGM',
     spotifyId: '37i9dQZF1DX1n9whJhb1hd',
+    type: 'playlist',
+  },
+  {
+    id: 'jpop-hits',
+    name: 'Tokyo Super Hits',
+    category: 'jpop',
+    icon: '🎤',
+    description: '今聴くべき話題の最新J-POPヒット曲まとめ',
+    spotifyId: '37i9dQZF1DXdbXrPNafg9d',
+    type: 'playlist',
+  },
+  {
+    id: 'anime-now',
+    name: 'Anime Now!',
+    category: 'anime',
+    icon: '⚡',
+    description: '人気アニメの主題歌・オープニング・名曲集',
+    spotifyId: '37i9dQZF1DX6XceWZP1Ap4',
     type: 'playlist',
   },
   {
@@ -57,12 +83,12 @@ export const BGM_PRESETS: BgmPreset[] = [
     type: 'playlist',
   },
   {
-    id: 'synthwave-focus',
-    name: 'Retro Synth Chill',
-    category: 'lofi',
-    icon: '🌌',
-    description: 'サイバーパンク・80sレトロフューチャーな疾走感',
-    spotifyId: '37i9dQZF1DXd9rSDyQguIk',
+    id: 'gaming-beats',
+    name: 'Gaming Lounge',
+    category: 'rpg',
+    icon: '🎮',
+    description: 'テンションを上げて集中するゲーム・エレクトロサウンド',
+    spotifyId: '37i9dQZF1DWTyiBJ6yCQ2C',
     type: 'playlist',
   },
   {
@@ -74,6 +100,21 @@ export const BGM_PRESETS: BgmPreset[] = [
     spotifyId: '37i9dQZF1DX8ymr6UES72f',
     type: 'playlist',
   }
+];
+
+const SEARCH_SUGGESTIONS = [
+  'YOASOBI',
+  '米津玄師',
+  'Ado',
+  'Official髭男dism',
+  'ゼルダの伝説 BGM',
+  'ジブリ BGM',
+  'スタジオジブリ ピアノ',
+  'アニソン 集中',
+  'ボカロ 作業用',
+  'クラシック 集中',
+  'Lofi Girl',
+  'EDM Gaming'
 ];
 
 export function convertToSpotifyEmbedUrl(input: string): string | null {
@@ -102,6 +143,16 @@ export function convertToSpotifyEmbedUrl(input: string): string | null {
   return null;
 }
 
+export function convertToSpotifyWebUrl(embedUrl: string): string {
+  if (!embedUrl) return 'https://open.spotify.com';
+  const match = embedUrl.match(/open\.spotify\.com\/embed\/(playlist|album|track|artist|episode)\/([a-zA-Z0-9]+)/);
+  if (match) {
+    const [, type, id] = match;
+    return `https://open.spotify.com/${type}/${id}`;
+  }
+  return embedUrl.replace('/embed/', '/');
+}
+
 interface SpotifyPlayerModalProps {
   onClose: () => void;
   currentTrackTitle: string;
@@ -115,40 +166,89 @@ export const SpotifyPlayerModal: React.FC<SpotifyPlayerModalProps> = ({
   currentEmbedUrl,
   onSelectTrack,
 }) => {
-  const [activeTab, setActiveTab] = useState<'presets' | 'custom' | 'guide'>('presets');
-  const [customInputUrl, setCustomInputUrl] = useState('');
-  const [customTitle, setCustomTitle] = useState('');
-  const [customError, setCustomError] = useState<string | null>(null);
-  const [isLargePlayer, setIsLargePlayer] = useState(() => {
-    return localStorage.getItem('focusquest_spotify_player_size') === 'large';
+  const [activeTab, setActiveTab] = useState<'search' | 'my-library' | 'presets' | 'help'>('search');
+  
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Custom tracks (My Library)
+  const [customTracks, setCustomTracks] = useState<CustomTrack[]>(() => {
+    try {
+      const saved = localStorage.getItem('focus_quest_custom_bgm_list');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // fallback
+    }
+    return [
+      {
+        id: 'sample-track-1',
+        title: 'お気に入り曲（サンプル）',
+        embedUrl: 'https://open.spotify.com/embed/track/4cOdK2wGLETKBW3PvgPWqT?utm_source=generator&theme=0',
+        webUrl: 'https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT',
+        addedAt: Date.now()
+      }
+    ];
   });
 
-  const handleTogglePlayerSize = () => {
-    const next = !isLargePlayer;
-    setIsLargePlayer(next);
-    localStorage.setItem('focusquest_spotify_player_size', next ? 'large' : 'compact');
+  const [inputUrl, setInputUrl] = useState('');
+  const [inputTitle, setInputTitle] = useState('');
+  const [addError, setAddError] = useState<string | null>(null);
+
+  const saveCustomTracks = (updated: CustomTrack[]) => {
+    setCustomTracks(updated);
+    try {
+      localStorage.setItem('focus_quest_custom_bgm_list', JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
   };
 
-  const handleApplyCustomUrl = (e: React.FormEvent) => {
+  const handleAddCustomTrack = (e: React.FormEvent) => {
     e.preventDefault();
-    setCustomError(null);
-    if (!customInputUrl.trim()) {
-      setCustomError('SpotifyのURLまたは共有リンクを入力してください');
+    setAddError(null);
+    if (!inputUrl.trim()) {
+      setAddError('SpotifyのURLまたは共有リンクを入力してください');
       return;
     }
 
-    const embedUrl = convertToSpotifyEmbedUrl(customInputUrl);
+    const embedUrl = convertToSpotifyEmbedUrl(inputUrl);
     if (!embedUrl) {
-      setCustomError('有効なSpotifyのURLではありません。（例: https://open.spotify.com/playlist/...）');
+      setAddError('有効なSpotifyリンクではありません（例: https://open.spotify.com/track/〇〇 または playlist / album）');
       return;
     }
 
-    const title = customTitle.trim() || 'マイ プレイリスト';
+    const webUrl = convertToSpotifyWebUrl(embedUrl);
+    const title = inputTitle.trim() || `マイ音楽 (${customTracks.length + 1})`;
+
+    const newTrack: CustomTrack = {
+      id: `custom-${Date.now()}`,
+      title,
+      embedUrl,
+      webUrl,
+      addedAt: Date.now()
+    };
+
+    const updated = [newTrack, ...customTracks];
+    saveCustomTracks(updated);
     onSelectTrack(title, embedUrl);
-    setCustomInputUrl('');
-    setCustomTitle('');
-    setActiveTab('presets');
+    setInputUrl('');
+    setInputTitle('');
+    setActiveTab('my-library');
   };
+
+  const handleDeleteCustomTrack = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = customTracks.filter(t => t.id !== id);
+    saveCustomTracks(updated);
+  };
+
+  const handleSearchSpotify = (query: string) => {
+    if (!query.trim()) return;
+    const url = `https://open.spotify.com/search/${encodeURIComponent(query.trim())}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const directSpotifyWebUrl = convertToSpotifyWebUrl(currentEmbedUrl);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in font-['DotGothic16'] select-none">
@@ -163,57 +263,58 @@ export const SpotifyPlayerModal: React.FC<SpotifyPlayerModalProps> = ({
             <div>
               <div className="flex items-center gap-1.5">
                 <h3 className="text-sm sm:text-base font-bold text-emerald-300 truncate">
-                  Spotify BGM プレイヤー
+                  Spotify 好きな曲・BGMプレイヤー
                 </h3>
                 <span className="text-[9px] bg-emerald-950 text-emerald-400 border border-emerald-700/80 px-1 py-0.2 rounded font-mono">
-                  Official Embed
+                  Custom Music
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 truncate">
-                クエスト中の作業BGM・あなたのアカウントで直接再生
+                好きな曲・アーティスト検索 & プレイリスト登録
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={handleTogglePlayerSize}
-              className="pixel-btn text-[10px] !py-1 !px-2 flex items-center gap-1 !border-emerald-700 !text-emerald-300 hover:!bg-emerald-950"
-              title={isLargePlayer ? 'コンパクト表示にする' : 'リストを大きく表示する'}
-            >
-              <span>{isLargePlayer ? '🔽 ミニ' : '🔼 展開'}</span>
-            </button>
-            <button
-              onClick={onClose}
-              className="pixel-btn text-xs !py-1 !px-2.5 !border-slate-600 !text-slate-400 hover:!bg-slate-800 hover:!text-white"
-            >
-              ✕
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="pixel-btn text-xs !py-1 !px-2.5 !border-slate-600 !text-slate-400 hover:!bg-slate-800 hover:!text-white"
+          >
+            ✕
+          </button>
         </div>
 
-        {/* Embedded Spotify Player Card (Always Visible at Top) */}
-        <div className="p-3 sm:p-4 bg-slate-950/60 border-b border-slate-800 flex-shrink-0">
-          <div className="flex items-center justify-between mb-1.5 text-xs">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-slate-400 text-[10px] sm:text-xs">再生中:</span>
-              <span className="font-bold text-emerald-300 truncate text-[11px] sm:text-xs">
-                {currentTrackTitle}
-              </span>
+        {/* Current Playing Bar & Spotify Direct Launch */}
+        <div className="px-3 sm:px-4 py-2 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between gap-2 flex-shrink-0">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300 truncate">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+              <span className="truncate">セット中: {currentTrackTitle}</span>
             </div>
-            <span className="text-[9px] text-slate-400 flex items-center gap-1">
-              🔑 <span>プレイヤー内でSpotifyログイン可能</span>
-            </span>
+            <div className="text-[9px] text-slate-400 truncate">
+              Spotifyアプリ/ブラウザで開くと、あなたのアカウントでフル尺再生できます
+            </div>
           </div>
 
-          {/* Spotify iframe */}
-          <div className="w-full rounded-xl overflow-hidden shadow-lg border border-emerald-500/30 bg-black/60 transition-all duration-300">
+          <a
+            href={directSpotifyWebUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="pixel-btn active text-[10px] !py-1 !px-2.5 !bg-emerald-600 hover:!bg-emerald-500 !border-emerald-400 text-white font-bold flex items-center gap-1 shadow-sm whitespace-nowrap flex-shrink-0"
+            title="SpotifyアプリまたはWeb版でフル再生"
+          >
+            <span>🚀 Spotifyで開く</span>
+            <span>↗</span>
+          </a>
+        </div>
+
+        {/* Embedded Mini Player */}
+        <div className="px-3 py-2 bg-slate-950/40 border-b border-slate-800 flex-shrink-0">
+          <div className="w-full rounded-lg overflow-hidden shadow border border-emerald-500/30 bg-black/60">
             <iframe
               key={currentEmbedUrl}
               src={currentEmbedUrl}
               width="100%"
-              height={isLargePlayer ? "352" : "152"}
+              height="80"
               frameBorder="0"
               allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
               loading="lazy"
@@ -221,215 +322,334 @@ export const SpotifyPlayerModal: React.FC<SpotifyPlayerModalProps> = ({
               className="w-full block"
             />
           </div>
-
-          <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
-            <div className="flex items-center gap-1">
-              <span className="text-emerald-400">💡</span>
-              <span>プレイヤー右上の「Log in」からログインするとフル再生できます</span>
-            </div>
-            <button
-              onClick={() => setActiveTab('guide')}
-              className="text-emerald-400 hover:underline flex items-center gap-0.5 ml-2 whitespace-nowrap"
-            >
-              <span>ログイン方法</span>
-              <span>›</span>
-            </button>
-          </div>
         </div>
 
-        {/* Tabs Bar */}
-        <div className="flex items-center gap-1 px-3 pt-2 bg-slate-900 border-b border-slate-800 flex-shrink-0">
+        {/* Navigation Tabs */}
+        <div className="flex items-center gap-1 px-3 pt-2 bg-slate-900 border-b border-slate-800 flex-shrink-0 overflow-x-auto">
+          <button
+            onClick={() => setActiveTab('search')}
+            className={`px-3 py-1.5 text-xs font-bold rounded-t-lg border-t-2 border-x-2 transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'search'
+                ? 'bg-slate-800 border-emerald-500 text-emerald-300'
+                : 'bg-slate-950/40 border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span>🔍</span>
+            <span>好きな曲を検索</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('my-library')}
+            className={`px-3 py-1.5 text-xs font-bold rounded-t-lg border-t-2 border-x-2 transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'my-library'
+                ? 'bg-slate-800 border-emerald-500 text-emerald-300'
+                : 'bg-slate-950/40 border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span>⭐</span>
+            <span>マイ保存リスト ({customTracks.length})</span>
+          </button>
           <button
             onClick={() => setActiveTab('presets')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-t-lg border-t-2 border-x-2 transition-colors flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 text-xs font-bold rounded-t-lg border-t-2 border-x-2 transition-colors flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'presets'
                 ? 'bg-slate-800 border-emerald-500 text-emerald-300'
                 : 'bg-slate-950/40 border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
             <span>📜</span>
-            <span>集中用おすすめBGM</span>
+            <span>おすすめBGM</span>
           </button>
           <button
-            onClick={() => setActiveTab('custom')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-t-lg border-t-2 border-x-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === 'custom'
-                ? 'bg-slate-800 border-emerald-500 text-emerald-300'
-                : 'bg-slate-950/40 border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <span>🔗</span>
-            <span>自分のURLを追加</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('guide')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-t-lg border-t-2 border-x-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === 'guide'
+            onClick={() => setActiveTab('help')}
+            className={`px-3 py-1.5 text-xs font-bold rounded-t-lg border-t-2 border-x-2 transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'help'
                 ? 'bg-slate-800 border-emerald-500 text-emerald-300'
                 : 'bg-slate-950/40 border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
             <span>❓</span>
-            <span>アカウント解説</span>
+            <span>使い方</span>
           </button>
         </div>
 
         {/* Tab Contents (Scrollable) */}
         <div className="p-3 sm:p-4 overflow-y-auto flex-1 space-y-3">
-          {/* TAB 1: PRESETS */}
+          {/* TAB 1: SEARCH FAVORITE SONGS */}
+          {activeTab === 'search' && (
+            <div className="space-y-3">
+              <div className="p-3 bg-emerald-950/40 border border-emerald-700/60 rounded-lg space-y-1.5 text-xs text-slate-300">
+                <div className="font-bold text-emerald-300 flex items-center gap-1.5 text-sm">
+                  <span>🎧</span>
+                  <span>好きな曲・アーティスト名でSpotifyを開く</span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  好きな曲名、歌手名、アニメ・ゲームタイトルを入力すると、Spotifyの公式検索画面に直結してすぐ再生できます。
+                </p>
+              </div>
+
+              {/* Search Form */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSearchSpotify(searchQuery);
+                }}
+                className="space-y-2"
+              >
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="例: YOASOBI、ゼルダの伝説、チルい曲、作業用BGMなど..."
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!searchQuery.trim()}
+                    className="pixel-btn active !bg-emerald-600 hover:!bg-emerald-500 !border-emerald-400 text-white font-bold text-xs !py-2 !px-4 flex items-center gap-1 whitespace-nowrap disabled:opacity-50"
+                  >
+                    <span>🔍 検索・再生</span>
+                  </button>
+                </div>
+              </form>
+
+              {/* Search Suggestions Chips */}
+              <div className="space-y-1.5">
+                <div className="text-[10px] text-slate-400 font-bold">人気の検索ワード（タップですぐ検索）：</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {SEARCH_SUGGESTIONS.map((word) => (
+                    <button
+                      key={word}
+                      onClick={() => {
+                        setSearchQuery(word);
+                        handleSearchSpotify(word);
+                      }}
+                      className="text-[10px] bg-slate-800/90 hover:bg-slate-700 border border-slate-700 hover:border-emerald-500 text-slate-300 hover:text-emerald-300 px-2 py-1 rounded transition-colors"
+                    >
+                      {word} ↗
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* How to add to My Library prompt */}
+              <div className="mt-4 p-3 bg-slate-950/70 rounded-lg border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                <div className="font-bold text-slate-200 flex items-center gap-1">
+                  <span>💡</span> <span>特定の曲をアプリ内にセット・保存したい場合</span>
+                </div>
+                <p>
+                  Spotifyで好きな曲の「…」メニューから「共有」→「曲のリンクをコピー」して、隣の「⭐ マイ保存リスト」タブから登録すると、いつでもこの画面からワンタップで呼び出せます！
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: MY SAVED LIBRARY (CUSTOM URLS) */}
+          {activeTab === 'my-library' && (
+            <div className="space-y-3">
+              {/* Add New Custom Track Form */}
+              <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2.5">
+                <div className="font-bold text-emerald-300 text-xs flex items-center gap-1">
+                  <span>➕</span> <span>お気に入りの曲・アルバム・プレイリストを登録</span>
+                </div>
+
+                <form onSubmit={handleAddCustomTrack} className="space-y-2">
+                  <div>
+                    <input
+                      type="text"
+                      value={inputUrl}
+                      onChange={(e) => setInputUrl(e.target.value)}
+                      placeholder="Spotifyリンクを貼り付け (例: https://open.spotify.com/track/...)"
+                      className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
+                    />
+                    {addError && (
+                      <p className="text-rose-400 text-[10px] mt-1 font-bold">⚠️ {addError}</p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={inputTitle}
+                      onChange={(e) => setInputTitle(e.target.value)}
+                      placeholder="曲名やメモ（例: お気に入りサントラ）"
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="submit"
+                      className="pixel-btn active !bg-emerald-600 hover:!bg-emerald-500 !border-emerald-400 text-white font-bold text-xs !py-1.5 !px-3 whitespace-nowrap"
+                    >
+                      ＋ 登録する
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* List of Custom Tracks */}
+              <div className="space-y-1.5">
+                <div className="text-[11px] text-slate-400 font-bold">保存したマイ曲リスト：</div>
+                
+                {customTracks.length === 0 ? (
+                  <div className="text-center py-6 text-slate-500 text-xs border border-dashed border-slate-800 rounded-lg">
+                    まだ曲が登録されていません。上の入力欄から好きなSpotifyリンクを登録してください。
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {customTracks.map((track) => {
+                      const isCurrent = currentEmbedUrl === track.embedUrl;
+                      return (
+                        <div
+                          key={track.id}
+                          className={`p-2.5 rounded-lg border-2 transition-all flex items-center justify-between gap-2 ${
+                            isCurrent
+                              ? 'bg-emerald-950/60 border-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                              : 'bg-slate-800/80 border-slate-700 hover:border-emerald-600/70'
+                          }`}
+                        >
+                          <div 
+                            onClick={() => onSelectTrack(track.title, track.embedUrl)}
+                            className="min-w-0 flex-1 cursor-pointer"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm">🎵</span>
+                              <span className={`text-xs font-bold truncate ${isCurrent ? 'text-emerald-300' : 'text-slate-200'}`}>
+                                {track.title}
+                              </span>
+                              {isCurrent && (
+                                <span className="text-[8px] bg-emerald-500 text-slate-950 font-bold px-1 rounded whitespace-nowrap">
+                                  再生中
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[9px] text-slate-400 truncate mt-0.5 font-mono">
+                              {track.webUrl}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <button
+                              onClick={() => onSelectTrack(track.title, track.embedUrl)}
+                              className="pixel-btn text-[9px] !py-0.5 !px-2 !border-emerald-600 !text-emerald-300 hover:!bg-emerald-950"
+                            >
+                              セット
+                            </button>
+                            <a
+                              href={track.webUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[9px] bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-emerald-300 border border-slate-700 hover:border-emerald-500 px-2 py-1 rounded flex items-center gap-0.5"
+                            >
+                              <span>Spotify</span>
+                              <span>↗</span>
+                            </a>
+                            <button
+                              onClick={(e) => handleDeleteCustomTrack(track.id, e)}
+                              className="text-slate-500 hover:text-rose-400 p-1 text-xs"
+                              title="削除"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: RECOMMENDED PRESETS */}
           {activeTab === 'presets' && (
             <div className="space-y-2">
               <div className="text-[11px] text-slate-400 mb-1">
-                勉強や集中、RPGの世界観にぴったりのSpotify厳選プレイリストです。タップして切り替えられます：
+                定番の集中・作業用Spotify公式プレイリストです。タップして選択できます：
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {BGM_PRESETS.map((preset) => {
                   const isCurrent = currentTrackTitle === preset.name;
                   const embedUrl = `https://open.spotify.com/embed/${preset.type}/${preset.spotifyId}?utm_source=generator&theme=0`;
+                  const webUrl = `https://open.spotify.com/${preset.type}/${preset.spotifyId}`;
+
                   return (
-                    <button
+                    <div
                       key={preset.id}
-                      onClick={() => onSelectTrack(preset.name, embedUrl)}
-                      className={`text-left p-2.5 rounded-lg border-2 transition-all flex items-start gap-2.5 ${
+                      className={`p-2.5 rounded-lg border-2 transition-all flex flex-col justify-between gap-2 ${
                         isCurrent
-                          ? 'bg-emerald-950/60 border-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.3)] scale-[1.01]'
-                          : 'bg-slate-800/80 border-slate-700 hover:border-emerald-600/70 hover:bg-slate-800'
+                          ? 'bg-emerald-950/60 border-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                          : 'bg-slate-800/80 border-slate-700 hover:border-emerald-600/70'
                       }`}
                     >
-                      <span className="text-2xl sm:text-3xl p-1 bg-slate-900/90 rounded border border-slate-700/60 flex-shrink-0">
-                        {preset.icon}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className={`text-xs sm:text-sm font-bold truncate ${isCurrent ? 'text-emerald-300' : 'text-slate-200'}`}>
-                            {preset.name}
-                          </span>
-                          {isCurrent && (
-                            <span className="text-[9px] bg-emerald-500 text-slate-950 font-bold px-1 rounded-sm whitespace-nowrap">
-                              再生中
+                      <div 
+                        onClick={() => onSelectTrack(preset.name, embedUrl)}
+                        className="flex items-start gap-2.5 cursor-pointer"
+                      >
+                        <span className="text-2xl p-1 bg-slate-900/90 rounded border border-slate-700/60 flex-shrink-0">
+                          {preset.icon}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-1">
+                            <span className={`text-xs sm:text-sm font-bold truncate ${isCurrent ? 'text-emerald-300' : 'text-slate-200'}`}>
+                              {preset.name}
                             </span>
-                          )}
+                            {isCurrent && (
+                              <span className="text-[9px] bg-emerald-500 text-slate-950 font-bold px-1 rounded-sm whitespace-nowrap">
+                                選択中
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-slate-400 line-clamp-2 mt-0.5 leading-relaxed">
+                            {preset.description}
+                          </p>
                         </div>
-                        <p className="text-[10px] text-slate-400 line-clamp-2 mt-0.5 leading-relaxed">
-                          {preset.description}
-                        </p>
                       </div>
-                    </button>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-700/60 text-[10px]">
+                        <button
+                          onClick={() => onSelectTrack(preset.name, embedUrl)}
+                          className="text-emerald-400 hover:underline flex items-center gap-1"
+                        >
+                          <span>▶ 埋め込みにセット</span>
+                        </button>
+                        <a
+                          href={webUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-slate-300 hover:text-emerald-300 flex items-center gap-0.5 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700 hover:border-emerald-500"
+                        >
+                          <span>Spotifyで開く</span>
+                          <span>↗</span>
+                        </a>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
             </div>
           )}
 
-          {/* TAB 2: CUSTOM URL */}
-          {activeTab === 'custom' && (
-            <div className="space-y-3">
-              <div className="p-3 bg-slate-950/70 rounded-lg border border-slate-700 text-xs leading-relaxed space-y-1 text-slate-300">
-                <div className="font-bold text-emerald-300 flex items-center gap-1">
-                  <span>🎧</span> <span>自分のお気に入りのSpotify楽曲やプレイリストを再生</span>
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  SpotifyアプリやWeb版から「共有」→「リンクをコピー」して、下の入力欄に貼り付けてください。
-                </p>
-              </div>
-
-              <form onSubmit={handleApplyCustomUrl} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">
-                    Spotify URL または共有リンク <span className="text-rose-400">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={customInputUrl}
-                    onChange={(e) => setCustomInputUrl(e.target.value)}
-                    placeholder="https://open.spotify.com/playlist/... または album / track"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
-                  />
-                  {customError && (
-                    <p className="text-rose-400 text-[10px] mt-1 font-bold">⚠️ {customError}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">
-                    プレイリストの名前（任意）
-                  </label>
-                  <input
-                    type="text"
-                    value={customTitle}
-                    onChange={(e) => setCustomTitle(e.target.value)}
-                    placeholder="例: お気に入り作業BGM、ゲームサントラなど"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="pixel-btn active w-full py-2 !border-emerald-500 !bg-emerald-600 hover:!bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-[0_0_15px_rgba(16,185,129,0.4)]"
-                >
-                  <span>▶️</span>
-                  <span>このSpotifyリンクをプレイヤーにセットする</span>
-                </button>
-              </form>
-
-              <div className="text-[10px] text-slate-500 border-t border-slate-800 pt-2 space-y-0.5">
-                <p>・プレイリスト (playlist)、アルバム (album)、楽曲 (track)、ポッドキャスト (episode) に対応しています。</p>
-                <p>・埋め込みプレイヤー上でログインすることで、フル尺での再生が可能になります。</p>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: ACCOUNT & GUIDE */}
-          {activeTab === 'guide' && (
+          {/* TAB 4: HELP & TIPS */}
+          {activeTab === 'help' && (
             <div className="space-y-3 text-xs">
-              <div className="p-3 bg-emerald-950/40 border border-emerald-700/60 rounded-lg space-y-2">
+              <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2">
                 <div className="font-bold text-emerald-300 flex items-center gap-1.5 text-sm">
-                  <span>✨</span>
-                  <span>Spotifyアカウントでログインしてフル再生する方法</span>
+                  <span>🎧</span>
+                  <span>Spotifyで好きな曲を流しながら集中する方法</span>
                 </div>
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  本アプリのプレイヤーはSpotify公式の公式埋め込みシステムを使用しています。
-                  そのため、特別なOAuth設定や開発者登録は不要で、<span className="text-emerald-300 font-bold">普段使っているSpotifyアカウントでそのまま安全に聴くことができます</span>。
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <div className="p-2.5 bg-slate-950/80 rounded-lg border border-slate-800 flex items-start gap-2.5">
-                  <span className="text-lg bg-emerald-950 text-emerald-400 font-bold w-6 h-6 flex items-center justify-center rounded-full border border-emerald-700 flex-shrink-0">
-                    1
-                  </span>
-                  <div>
-                    <div className="font-bold text-slate-200">プレイヤー内の「Log in」をクリック</div>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      上のプレイヤーの右上にある「Log in」（または「Spotifyで開く」）を押すと、Spotifyの公式ログイン画面が開きます。
-                    </p>
-                  </div>
-                </div>
-
-                <div className="p-2.5 bg-slate-950/80 rounded-lg border border-slate-800 flex items-start gap-2.5">
-                  <span className="text-lg bg-emerald-950 text-emerald-400 font-bold w-6 h-6 flex items-center justify-center rounded-full border border-emerald-700 flex-shrink-0">
-                    2
-                  </span>
-                  <div>
-                    <div className="font-bold text-slate-200">ログイン後にフル再生スタート</div>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      ログインするとブラウザにSpotifyのセッションが記憶され、この画面内でも制限なしでフル楽曲が流れるようになります。
-                    </p>
-                  </div>
-                </div>
-
-                <div className="p-2.5 bg-slate-950/80 rounded-lg border border-slate-800 flex items-start gap-2.5">
-                  <span className="text-lg bg-emerald-950 text-emerald-400 font-bold w-6 h-6 flex items-center justify-center rounded-full border border-emerald-700 flex-shrink-0">
-                    3
-                  </span>
-                  <div>
-                    <div className="font-bold text-slate-200">FreeプランとPremiumプランの違い</div>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      <span className="text-amber-300 font-medium">Spotify Premium:</span> 全曲フル尺再生・曲飛ばし無制限・高音質。<br />
-                      <span className="text-slate-300 font-medium">Spotify Free:</span> 30秒プレビューまたはシャッフル再生に対応します。
-                    </p>
-                  </div>
+                <div className="space-y-2 text-[11px] text-slate-300 leading-relaxed">
+                  <p>
+                    <strong className="text-emerald-300">方法 1: 曲名やアーティスト名で検索（一番おすすめ！）</strong><br />
+                    「🔍 好きな曲を検索」タブに聴きたい曲名や歌手名（例: YOASOBI、ゼルダの伝説など）を入力して「検索・再生」を押すと、ご自身のSpotifyアプリ/Web版が開き、フル尺で再生がスタートします。
+                  </p>
+                  <p>
+                    <strong className="text-emerald-300">方法 2: お気に入りの曲やプレイリストをマイ保存リストに登録</strong><br />
+                    Spotifyアプリの曲やプレイリストの「共有」→「リンクをコピー」したURLを「⭐ マイ保存リスト」に貼り付けると、アプリ内にいつでも呼び出せるように登録できます。
+                  </p>
+                  <p>
+                    <strong className="text-emerald-300">方法 3: おすすめBGMからワンタップで選択</strong><br />
+                    「📜 おすすめBGM」タブから定番のLofi BeatsやJ-POP、ゲームBGMなどをいつでも一発でセットして聴くことができます。
+                  </p>
                 </div>
               </div>
             </div>
@@ -439,7 +659,7 @@ export const SpotifyPlayerModal: React.FC<SpotifyPlayerModalProps> = ({
         {/* Footer */}
         <div className="px-3 sm:px-4 py-2.5 bg-slate-950/90 border-t border-slate-800 flex items-center justify-between flex-shrink-0">
           <div className="text-[9px] text-slate-500">
-            Powered by Spotify Embed API • Focus Quest BGM
+            Focus Quest Audio Engine
           </div>
           <button
             onClick={onClose}
